@@ -2,7 +2,7 @@
 
 Este documento define os protocolos, comportamentos e padrões de chamada esperados para qualquer Agente de IA que interaja com o sistema **Omni-CRM**.
 
-**Estado do runtime (2026-09-24):** o pack abaixo é o contrato *alvo*. O código em `master` ainda é protótipo (MCP mock, Kanban estático, sem `/api/tasks`). Fonte de verdade da auditoria: [`docs/AUDITORIA.md`](./docs/AUDITORIA.md). Plano 0→100: [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md). Playbooks por agente: [`agents/`](./agents/).
+**Estado do runtime (0.1.0):** MCP oficial (`initialize` / `tools/list` / `tools/call`) persiste no SQLite, Kanban lê o banco, captura de lead e copy com Human Review estão ligados. Auditoria do pack original: [`docs/AUDITORIA.md`](./docs/AUDITORIA.md). Roadmap: [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md). Playbooks: [`agents/`](./agents/).
 
 O Omni-CRM tem dois domínios que **não** devem ser fundidos num único status:
 
@@ -21,7 +21,7 @@ O Omni-CRM tem dois domínios que **não** devem ser fundidos num único status:
     - Conexão via protocolo MCP (`/api/mcp-server`).
    - Papel: Leitura de tarefas, atualização de status (`in_progress`, `in_review`) e submissão de logs de código.
 2. **OpenClaw / Harness Agents**
-    - Conexão via Webhook REST (`/api/tasks`) — **rota ainda não implementada**.
+    - Conexão via Webhook REST (`/api/tasks`).
    - Papel: Execução assíncrona de tarefas de background, auditorias de segurança e builds.
 3. **Grok Bot / Headless Agents**
     - Conexão via MCP ou REST.
