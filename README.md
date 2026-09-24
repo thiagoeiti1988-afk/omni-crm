@@ -1,80 +1,94 @@
-# Omni-CRM: Hub Central Multivetorial para Agentes de IA
+# Omni-CRM: Hub de agentes + CRM de vendas
 
-> **Status: protótipo (0.1.0).** README, SPEC e AGENTS descrevem o contrato alvo. O runtime atual tem Kanban estático e MCP mock — ver [`docs/AUDITORIA.md`](./docs/AUDITORIA.md) e [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md).
+> **Status: 0.1.0 runtime real (SQLite).** Kanban, MCP, leads, ICP e copy leem/gravam o mesmo banco. Postgres/`pgvector` está no `schema.sql` para migração; o processo local usa `node:sqlite`.
 
-Omni-CRM é uma plataforma de gerenciamento e centralização de tarefas, projetos e memórias para múltiplos agentes de IA (Cursor, Codex, OpenClaw, Grok), com evolução prevista para CRM comercial (ICP, leads, copy).
-
-Construído com Next.js (App Router), TypeScript, TailwindCSS e PostgreSQL (`pgvector`). O alvo é funcionar como **Servidor MCP** e painel Kanban ligado ao banco; isso ainda não está persistido.
+Omni-CRM junta **orquestração de agentes** (Quanta / Kanban / MCP) com **domínio comercial** (organização, pipeline, ICP, lead, copy com Human Review) e **memória vetorial** determinística (1536d) para busca entre agentes.
 
 ---
 
-## 🚀 Funcionalidades
+## O que está implementado
 
-- **MCP Server Integrado (`/api/mcp-server`)**: Permite que IDEs e agentes (como Cursor, Claude Code) leiam e atualizem tarefas diretamente via JSON-RPC.
-- **RAG & Suporte a Vetores (`pgvector`)**: Armazena logs de execução de agentes vetorizados (embeddings 1536d) para permitir busca semântica do histórico de código e ações entre agentes.
-- **Painel Kanban em Tempo Real**: Dashboard em Next.js com TailwindCSS otimizado para acompanhar o progresso das tarefas (*To Do*, *In Progress*, *Human Review*, *Done*).
-- **Arquitetura JEV (Just Enough Validation)**: Foco em alta performance, minimalismo e zero paralisia por análise.
+- MCP JSON-RPC 2.0 em `POST /api/mcp-server`: `initialize`, `tools/list`, `tools/call`, `ping` (aliases `mcp.*` ainda respondem).
+- Auth obrigatória: `Authorization: Bearer <org api key>`. Writes sem token → 401.
+- Tenancy: duas orgs seed (`Acme` / `Beta`) isoladas.
+- Kanban = tabela `tasks` (counts reais; ponto MCP verde só com `/api/health`).
+- `POST /api/tasks` webhook de status (mesmo contrato de transição).
+- Captura `POST /api/leads` com consentimento e dedupe por e-mail.
+- Copy `POST /api/copy` a partir de ICP aprovado + memória; revisão humana.
+- Testes: `npm test` (13 casos de contrato, isolamento, captura, copy).
+
+## O que ainda não é produção SaaS
+
+- Auth de usuário (e-mail/senha) — hoje a UI usa API keys de demo.
+- Postgres vivo + RLS no Supabase (schema preparado, runtime SQLite).
+- Embeddings de vendor (OpenAI); o RAG local é hash bag-of-words 1536d.
+- Transporte MCP Streamable HTTP/SSE do SDK; o Cursor deve POSTar JSON-RPC com Bearer.
 
 ---
 
-## 🛠️ Tecnologias
+## Tecnologias
 
-- **Framework**: Next.js 16 (React 19, App Router)
-- **Estilização**: TailwindCSS
-- **Linguagem**: TypeScript
-- **Banco de Dados**: PostgreSQL com extensão `pgvector`
-- **Protocolos**: Model Context Protocol (MCP) da Anthropic / Linux Foundation
+- Next.js 16, React 19, Tailwind 4, TypeScript
+- Persistência: SQLite (`node:sqlite`) · alvo: PostgreSQL + pgvector (`schema.sql`)
+- MCP JSON-RPC 2.0
 
 ---
 
-## 🚦 Como Rodar o Projeto
-
-### 1. Clonar e Instalar Dependências
+## Como rodar
 
 ```bash
 git clone https://github.com/thiagoeiti1988-afk/omni-crm.git
 cd omni-crm
 npm install
-```
-
-### 2. Configurar o Banco de Dados
-
-Execute o arquivo `schema.sql` no seu PostgreSQL / Supabase para habilitar o `pgvector` e criar as tabelas base.
-
-```bash
-psql -h <host> -U <user> -d <database> -f schema.sql
-```
-
-### 3. Rodar o Servidor de Desenvolvimento
-
-```bash
+cp .env.example .env
+npm test
 npm run dev
 ```
 
-Acesse [http://localhost:3000](http://localhost:3000) para visualizar o Dashboard Kanban.
+Abra [http://localhost:3000](http://localhost:3000). Troque a org no seletor (Acme vs Beta) para ver isolamento.
 
----
+Chaves de demo (seed automático):
 
-## 🔌 Conectando Agentes de IA via MCP
+| Org | Bearer |
+| :--- | :--- |
+| Acme Vendas | `omni_org_acme_demo` |
+| Beta Labs | `omni_org_beta_demo` |
 
-Para conectar o **Cursor**, adicione no arquivo de configuração do MCP:
+Headers extras: `X-Actor-Role: agent|human|harness`, `X-Agent-Id: ...`.  
+`done` e aprovação de copy só com `human` ou `harness`.
+
+### MCP (Cursor)
 
 ```json
 {
   "mcpServers": {
     "omni-crm": {
-      "url": "http://localhost:3000/api/mcp-server"
+      "url": "http://localhost:3000/api/mcp-server",
+      "headers": {
+        "Authorization": "Bearer omni_org_acme_demo",
+        "X-Actor-Role": "agent",
+        "X-Agent-Id": "cursor-agent"
+      }
     }
   }
 }
 ```
 
+Exemplo:
+
+```bash
+curl -s http://localhost:3000/api/mcp-server \
+  -H 'Authorization: Bearer omni_org_acme_demo' \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+```
+
 ---
 
-## 📄 Documentação Técnica
+## Documentação
 
-- [SPEC.md](./SPEC.md) — API, banco e arquitetura (contrato alvo).
-- [AGENTS.md](./AGENTS.md) — plataformas, ciclo Quanta e papéis de agente.
-- [docs/AUDITORIA.md](./docs/AUDITORIA.md) — o que é real, o que é risco, o que manter.
-- [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md) — execução do kernel até o CRM de vendas.
-- [agents/](./agents/) — playbooks `auditor`, `repair`, `icp`, `lead-capture`, `copywriter`.
+- [SPEC.md](./SPEC.md) — API, schema, tools
+- [AGENTS.md](./AGENTS.md) — ciclo Quanta e papéis
+- [docs/AUDITORIA.md](./docs/AUDITORIA.md) — leitura do pack original
+- [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md) — critérios de 100%
+- [agents/](./agents/) — auditor, repair, icp, lead-capture, copywriter

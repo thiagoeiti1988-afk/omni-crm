@@ -1,6 +1,7 @@
 # Auditoria Omni-CRM (IntHub)
 
 **Data:** 2026-09-24  
+**Atualização:** o agente `repair` implementou o kernel + domínio comercial no mesmo branch (SQLite, MCP oficial, tenancy, leads/copy). Esta página documenta o **pack original** que foi auditado; o runtime vigente está em README/SPEC/`npm test`.
 **Escopo:** repositório `thiagoeiti1988-afk/omni-crm` (pack README + AGENTS + SPEC + protótipo Next.js)  
 **Objetivo desta leitura:** separar o que o pack promete, o que o código realmente faz, o que é risco agora, o que já é infraestrutura útil, e o que falta para o produto de vendas (ICP, lead, copy) ir de 0 a 100.
 
