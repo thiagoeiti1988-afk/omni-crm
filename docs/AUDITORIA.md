@@ -161,6 +161,22 @@ Não subir agente de copy/lead **antes** de `repair` fechar persistência e auth
 
 ---
 
+## 6.1 Addendum — Fase 1 (`repair`) executada
+
+Este PR fechou o kernel:
+
+- MCP fala protocolo oficial (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) — `mcp.initialize`/`mcp.tools.list` foram removidos.
+- `tools/call` persiste de verdade: `list_tasks`, `get_task`, `update_task_status`, `append_agent_log` (Supabase, sem embedding ainda).
+- `update_task_status` via agente **não aceita `done`** (matriz de transição em `src/lib/db.ts`); só `POST /api/tasks` (Harness/OpenClaw) fecha o Quanta.
+- Bearer auth (`MCP_API_KEY`) em ambas as rotas, fail-closed: sem a env var, tudo é 401/503 — nunca "modo aberto".
+- `schema.sql`: `tasks.project_id NOT NULL`, `CHECK` de status, trigger `updated_at`.
+- Kanban é Server Component lendo `tasks`; indicador "Online" reflete healthcheck real, não mais estático.
+- Testes de contrato (`npm test`, `node:test` via `tsx`): initialize, tools/list, tools/call, transição ilegal, `done` bloqueado para agente, method desconhecido, auth (sem env, sem header, token errado, token certo).
+
+**Ainda não fechado nesta passada (fora de escopo do `repair`, conforme `agents/repair.md`):** tenancy/RLS, pipeline de embedding, domínio comercial (ICP/leads/copy), CI, auth de usuário humano no painel — seguem no roadmap Fase 2+.
+
+---
+
 ## 7. Recomendação de execução
 
 1. Congelar o discurso de “v1.0.0 / MCP Online” até `tools/call` persistir de verdade.  

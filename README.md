@@ -1,6 +1,6 @@
 # Omni-CRM: Hub Central Multivetorial para Agentes de IA
 
-> **Status: protótipo (0.1.0).** README, SPEC e AGENTS descrevem o contrato alvo. O runtime atual tem Kanban estático e MCP mock — ver [`docs/AUDITORIA.md`](./docs/AUDITORIA.md) e [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md).
+> **Status: protótipo (0.1.0), kernel de agentes real (Fase 1 do roadmap).** MCP fala o protocolo oficial (`initialize`/`tools/list`/`tools/call`) com auth e persistência em Supabase; Kanban lê o banco de verdade. Domínio comercial (ICP/leads/copy) ainda não existe — ver [`docs/AUDITORIA.md`](./docs/AUDITORIA.md) e [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md).
 
 Omni-CRM é uma plataforma de gerenciamento e centralização de tarefas, projetos e memórias para múltiplos agentes de IA (Cursor, Codex, OpenClaw, Grok), com evolução prevista para CRM comercial (ICP, leads, copy).
 
@@ -10,9 +10,10 @@ Construído com Next.js (App Router), TypeScript, TailwindCSS e PostgreSQL (`pgv
 
 ## 🚀 Funcionalidades
 
-- **MCP Server Integrado (`/api/mcp-server`)**: Permite que IDEs e agentes (como Cursor, Claude Code) leiam e atualizem tarefas diretamente via JSON-RPC.
-- **RAG & Suporte a Vetores (`pgvector`)**: Armazena logs de execução de agentes vetorizados (embeddings 1536d) para permitir busca semântica do histórico de código e ações entre agentes.
-- **Painel Kanban em Tempo Real**: Dashboard em Next.js com TailwindCSS otimizado para acompanhar o progresso das tarefas (*To Do*, *In Progress*, *Human Review*, *Done*).
+- **MCP Server Integrado (`/api/mcp-server`)**: protocolo oficial (`initialize`, `tools/list`, `tools/call`) sobre JSON-RPC 2.0, com Bearer auth (`MCP_API_KEY`) e persistência real em Supabase. Tools: `list_tasks`, `get_task`, `update_task_status`, `append_agent_log`.
+- **Webhook Harness/OpenClaw (`/api/tasks`)**: único caminho autorizado a fechar um Quanta como `done` (ver AGENTS.md).
+- **RAG & Suporte a Vetores (`pgvector`)**: schema com `agent_logs.embedding` (1536d); pipeline de geração de embedding ainda é Fase 2.
+- **Painel Kanban ligado ao banco**: Server Component lendo `tasks` via Supabase; indicador "MCP Server: Online" só acende com o DB configurado (sem badge estático).
 - **Arquitetura JEV (Just Enough Validation)**: Foco em alta performance, minimalismo e zero paralisia por análise.
 
 ---
@@ -57,13 +58,14 @@ Acesse [http://localhost:3000](http://localhost:3000) para visualizar o Dashboar
 
 ## 🔌 Conectando Agentes de IA via MCP
 
-Para conectar o **Cursor**, adicione no arquivo de configuração do MCP:
+Para conectar o **Cursor**, adicione no arquivo de configuração do MCP (o `MCP_API_KEY` precisa bater com o definido no `.env` do servidor — sem ele, todo request é recusado com 401):
 
 ```json
 {
   "mcpServers": {
     "omni-crm": {
-      "url": "http://localhost:3000/api/mcp-server"
+      "url": "http://localhost:3000/api/mcp-server",
+      "headers": { "Authorization": "Bearer <MCP_API_KEY>" }
     }
   }
 }

@@ -55,25 +55,22 @@ O banco de dados é estruturado relacionalmente com extensão vetorial habilitad
 
 ## 3. Especificação da API MCP (`/api/mcp-server`)
 
-O endpoint `/api/mcp-server` implementa o protocolo JSON-RPC 2.0.
+O endpoint `/api/mcp-server` implementa o protocolo JSON-RPC 2.0 **oficial** (Fase 1 do roadmap, entregue): `initialize`, `notifications/initialized`, `tools/list`, `tools/call`. Requer `Authorization: Bearer <MCP_API_KEY>`; sem a env var configurada, o servidor recusa toda requisição (fail-closed).
 
 ### Métodos Suportados
 
-#### `initialize` (hoje no mock: `mcp.initialize` — **não** é o nome oficial MCP)
+#### `initialize`
 
-Contrato **alvo** (Fase 1 do roadmap): métodos JSON-RPC MCP `initialize`, `tools/list`, `tools/call`.
+- **Request**: `{ "jsonrpc": "2.0", "id": 1, "method": "initialize" }`
+- **Response**: `protocolVersion`, `capabilities.tools`, `serverInfo` (`omni-crm-mcp`, versão sincronizada com `package.json`).
 
-O protótipo atual em `src/app/api/mcp-server/route.ts` ainda responde a `mcp.initialize` / `mcp.tools.list` e **não** implementa `tools/call`.
+#### `tools/list` / `tools/call`
 
-- **Request alvo**: `{ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { ... } }`
-- **Response alvo**: `serverInfo` (`omni-crm-mcp`, versão = `package.json`, hoje `0.1.0`).
-
-#### `tools/list` (hoje no mock: `mcp.tools.list`)
-
-Ferramentas **alvo**:
-  - `get_task` / `get_task_status`: Consulta o estado de uma tarefa pelo `taskId`.
-  - `update_task_status`: Atualiza o status (`todo` \| `in_progress` \| `in_review`). Transição para `done` é humana / Harness (ver AGENTS.md).
-  - `append_agent_log`: (Fase 1) persiste memória; embedding na Fase 2.
+Tools implementadas (persistem em Supabase; `src/lib/mcp.ts` + `src/lib/db.ts`):
+  - `list_tasks(projectId?)`
+  - `get_task(taskId)`
+  - `update_task_status(taskId, status)`: aceita apenas `todo` \| `in_progress` \| `in_review`. Transição para `done` é exclusiva do webhook `POST /api/tasks` (humano / Harness, ver AGENTS.md) — a tool de agente rejeita `done` em runtime, não só por schema.
+  - `append_agent_log(projectId, agentId, actionType, logContent, taskId?)`: persiste memória; `embedding` fica `NULL` até a Fase 2 (pipeline RAG).
 
 ---
 

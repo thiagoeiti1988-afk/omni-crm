@@ -1,70 +1,68 @@
 import { NextResponse } from 'next/server';
+import { getSupabaseClient, DbNotConfiguredError } from '@/lib/db';
+import { handleMcpRequest, type JsonRpcRequest } from '@/lib/mcp';
+import { isAuthorized } from '@/lib/mcp-auth';
 
-// Omni-CRM MCP Server Endpoint
-// This endpoint receives JSON-RPC commands from agents (Cursor, Claude, etc.)
-// and interfaces with our Supabase/PostgreSQL database via JEV boundaries.
+// Omni-CRM MCP Server — protocolo oficial (initialize, tools/list, tools/call)
+// sobre JSON-RPC 2.0. Ver docs/AUDITORIA.md P0-1/P0-2 para o que isto substitui.
 
 export async function POST(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Unauthorized' } },
+      { status: 401 }
+    );
+  }
+
+  let body: JsonRpcRequest;
   try {
-    const body = await req.json();
-    
-    // Minimal mock for JSON-RPC MCP Server processing
-    // In production, this routes to a properly instantiated @modelcontextprotocol/sdk Server instance
-    
-    if (body.method === 'mcp.initialize') {
-      return NextResponse.json({
-        jsonrpc: '2.0',
-        id: body.id,
-        result: {
-          capabilities: { 
-            tools: { listChanged: true }, 
-            resources: { listChanged: true } 
-          },
-          serverInfo: { name: 'omni-crm-mcp', version: '1.0.0' }
-        }
-      });
-    }
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
+      { status: 400 }
+    );
+  }
 
-    if (body.method === 'mcp.tools.list') {
-      return NextResponse.json({
-        jsonrpc: '2.0',
-        id: body.id,
-        result: {
-          tools: [
-            {
-              name: 'get_task_status',
-              description: 'Fetch the status of a specific task in the Omni-CRM.',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  taskId: { type: 'string' }
-                },
-                required: ['taskId']
-              }
-            },
-            {
-              name: 'update_task_status',
-              description: 'Update the status of a specific task in the Omni-CRM.',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  taskId: { type: 'string' },
-                  status: { type: 'string', enum: ['todo', 'in_progress', 'in_review', 'done'] }
-                },
-                required: ['taskId', 'status']
-              }
-            }
-          ]
-        }
-      });
-    }
+  if (!body || typeof body.method !== 'string') {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: body?.id ?? null, error: { code: -32600, message: 'Invalid Request' } },
+      { status: 400 }
+    );
+  }
 
-    return NextResponse.json({
-      jsonrpc: '2.0',
-      id: body.id,
-      error: { code: -32601, message: 'Method not found' }
-    });
+  try {
+    const client = getSupabaseClient();
+    const response = await handleMcpRequest(body, client);
+    // Notificação JSON-RPC (ex.: notifications/initialized): sem corpo, 204.
+    if (response === null) {
+      return new NextResponse(null, { status: 204 });
+    }
+    return NextResponse.json(response);
   } catch (error) {
-    return NextResponse.json({ error: 'Invalid Request' }, { status: 400 });
+    if (error instanceof DbNotConfiguredError) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: body.id ?? null, error: { code: -32001, message: error.message } },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      {
+        jsonrpc: '2.0',
+        id: body.id ?? null,
+        error: { code: -32603, message: 'Internal error' },
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// Healthcheck simples para o indicador "MCP Server: Online" do Kanban.
+export async function GET() {
+  try {
+    getSupabaseClient();
+    return NextResponse.json({ status: 'ok' });
+  } catch {
+    return NextResponse.json({ status: 'not_configured' }, { status: 503 });
   }
 }
