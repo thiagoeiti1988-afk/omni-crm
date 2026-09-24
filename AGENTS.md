@@ -2,19 +2,42 @@
 
 Este documento define os protocolos, comportamentos e padrões de chamada esperados para qualquer Agente de IA que interaja com o sistema **Omni-CRM**.
 
+**Estado do runtime (2026-09-24):** o pack abaixo é o contrato *alvo*. O código em `master` ainda é protótipo (MCP mock, Kanban estático, sem `/api/tasks`). Fonte de verdade da auditoria: [`docs/AUDITORIA.md`](./docs/AUDITORIA.md). Plano 0→100: [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md). Playbooks por agente: [`agents/`](./agents/).
+
+O Omni-CRM tem dois domínios que **não** devem ser fundidos num único status:
+
+| Domínio | Unidade | Status |
+| :--- | :--- | :--- |
+| Engenharia / agentes (kernel) | Quanta (`tasks`) | `todo` → `in_progress` → `in_review` → `done` |
+| Vendas (ainda não no schema) | Lead / copy | funil comercial + Human Review da peça |
+
 ---
 
 ## 🤖 Agentes Suportados
 
+### Plataformas (transporte)
+
 1. **Cursor IDE / Claude Code**
-   - Conexão via protocolo MCP (`/api/mcp-server`).
-   - Papel: Leitura de tarefas, atualização de status (`in_progress`, `done`) e submissão de logs de código.
+    - Conexão via protocolo MCP (`/api/mcp-server`).
+   - Papel: Leitura de tarefas, atualização de status (`in_progress`, `in_review`) e submissão de logs de código.
 2. **OpenClaw / Harness Agents**
-   - Conexão via Webhook REST (`/api/tasks`).
+    - Conexão via Webhook REST (`/api/tasks`) — **rota ainda não implementada**.
    - Papel: Execução assíncrona de tarefas de background, auditorias de segurança e builds.
 3. **Grok Bot / Headless Agents**
-   - Conexão via MCP ou REST.
-   - Papel: Varredura de dados, sintese de relatórios e embeddings de conhecimento.
+    - Conexão via MCP ou REST.
+   - Papel: Varredura de dados, síntese de relatórios e embeddings de conhecimento.
+
+### Papéis de produto (playbooks)
+
+| Agente | Arquivo | Papel |
+| :--- | :--- | :--- |
+| `auditor` | [`agents/auditor.md`](./agents/auditor.md) | Spec vs código, segurança, drift de docs |
+| `repair` | [`agents/repair.md`](./agents/repair.md) | Ligar MCP oficial ↔ banco ↔ UI; auth; testes |
+| `icp` | [`agents/icp.md`](./agents/icp.md) | Público-alvo por projeto de venda |
+| `lead-capture` | [`agents/lead-capture.md`](./agents/lead-capture.md) | Ingestão e dedupe de leads |
+| `copywriter` | [`agents/copywriter.md`](./agents/copywriter.md) | Peças com Human Review |
+
+Ordem obrigatória: **auditor → repair (P0)** antes de icp / lead-capture / copywriter.
 
 ---
 
@@ -26,8 +49,10 @@ Cada tarefa no Omni-CRM deve respeitar o seguinte ciclo de vida:
 | :--- | :--- | :--- |
 | `todo` | Tarefa criada aguardando alocação | Humano / Agente Planejador |
 | `in_progress` | Tarefa sob execução por um agente | Agente Executor (Cursor / Codex) |
-| `in_review` | Bloqueado aguardando aprovação humana | Agente Executor ao concluir a lógica |
-| `done` | Tarefa verificada e concluída | Humano / Harness Agent |
+| `in_review` | Bloqueado aguardando aprovação humana | Agente Executor ao concluir a lógica (**não** marcar `done` sozinho) |
+| `done` | Tarefa verificada e concluída | Humano / Harness Agent após review |
+
+O executor **não** transiciona `in_review` → `done`. Isso evita dois agentes fecharem o mesmo Quanta e alinha SPEC com este arquivo.
 
 ---
 

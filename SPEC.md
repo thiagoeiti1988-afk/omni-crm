@@ -59,16 +59,21 @@ O endpoint `/api/mcp-server` implementa o protocolo JSON-RPC 2.0.
 
 ### Métodos Suportados
 
-#### `mcp.initialize`
-Retorna os detalhes e capacidades do servidor.
-- **Request**: `{ "jsonrpc": "2.0", "id": 1, "method": "mcp.initialize" }`
-- **Response**: Retorna metadados `serverInfo` (`omni-crm-mcp`, v1.0.0).
+#### `initialize` (hoje no mock: `mcp.initialize` — **não** é o nome oficial MCP)
 
-#### `mcp.tools.list`
-Lista todas as ferramentas disponíveis para os agentes chamarem.
-- Ferramentas expostas:
-  - `get_task_status`: Consulta o estado de uma tarefa pelo `taskId`.
-  - `update_task_status`: Atualiza o status de uma tarefa.
+Contrato **alvo** (Fase 1 do roadmap): métodos JSON-RPC MCP `initialize`, `tools/list`, `tools/call`.
+
+O protótipo atual em `src/app/api/mcp-server/route.ts` ainda responde a `mcp.initialize` / `mcp.tools.list` e **não** implementa `tools/call`.
+
+- **Request alvo**: `{ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { ... } }`
+- **Response alvo**: `serverInfo` (`omni-crm-mcp`, versão = `package.json`, hoje `0.1.0`).
+
+#### `tools/list` (hoje no mock: `mcp.tools.list`)
+
+Ferramentas **alvo**:
+  - `get_task` / `get_task_status`: Consulta o estado de uma tarefa pelo `taskId`.
+  - `update_task_status`: Atualiza o status (`todo` \| `in_progress` \| `in_review`). Transição para `done` é humana / Harness (ver AGENTS.md).
+  - `append_agent_log`: (Fase 1) persiste memória; embedding na Fase 2.
 
 ---
 
