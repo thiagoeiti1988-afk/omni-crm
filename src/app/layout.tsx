@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Omni-CRM",
-  description: "Hub de agentes, ICP, leads e copy com revisão humana",
+  title: "Omni-CRM Ops",
+  description: "Console de operação: funil, memória vetorial e agentes",
 };
 
 export default function RootLayout({

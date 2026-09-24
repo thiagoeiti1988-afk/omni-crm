@@ -1,5 +1,7 @@
 import { AuthError } from "./auth";
 import { StoreError, type OmniStore } from "./store";
+import { buildInsights } from "./analytics";
+import { runOpsAgent, type OpsAgentName } from "./agents";
 import type { AuthContext, LeadStage } from "./types";
 
 export const PROTOCOL_VERSION = "2024-11-05";
@@ -126,6 +128,26 @@ export const TOOLS = [
         decision: { type: "string", enum: ["approved", "rejected"] },
       },
       required: ["copyId", "decision"],
+    },
+  },
+  {
+    name: "get_insights",
+    description: "Sales + agent KPIs, funnel, source attribution, linear/parabola forecast.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "run_ops_agent",
+    description: "Dispatch analyst | copywriter | scout | icp against org data and memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent: { type: "string", enum: ["analyst", "copywriter", "scout", "icp"] },
+        prompt: { type: "string" },
+        leadId: { type: "string" },
+        channel: { type: "string" },
+        projectId: { type: "string" },
+      },
+      required: ["agent"],
     },
   },
 ] as const;
@@ -315,6 +337,28 @@ export function callTool(
         throw new StoreError("copyId and decision required");
       }
       return store.reviewCopy(auth, copyId, decision);
+    }
+    case "get_insights": {
+      const icp = store.getIcp(auth.org.id) ?? null;
+      return buildInsights({
+        leads: store.listLeads(auth.org.id),
+        tasks: store.listTasks(auth.org.id),
+        copies: store.listCopies(auth.org.id),
+        icp,
+      });
+    }
+    case "run_ops_agent": {
+      const agent = str(args.agent) as OpsAgentName | undefined;
+      if (!agent || !["analyst", "copywriter", "scout", "icp"].includes(agent)) {
+        throw new StoreError("agent must be analyst|copywriter|scout|icp");
+      }
+      return runOpsAgent(store, auth, {
+        agent,
+        prompt: str(args.prompt),
+        leadId: str(args.leadId),
+        channel: str(args.channel),
+        projectId: str(args.projectId),
+      });
     }
     default:
       throw new StoreError(`Unknown tool ${name}`, 404);
