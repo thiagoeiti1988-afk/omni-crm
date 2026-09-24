@@ -1,8 +1,10 @@
 # Omni-CRM: Hub Central Multivetorial para Agentes de IA
 
-Omni-CRM é uma plataforma de gerenciamento e centralização de tarefas, projetos e memórias para múltiplos agentes de IA (Cursor, Codex, OpenClaw, Grok). 
+> **Status: protótipo (0.1.0).** README, SPEC e AGENTS descrevem o contrato alvo. O runtime atual tem Kanban estático e MCP mock — ver [`docs/AUDITORIA.md`](./docs/AUDITORIA.md) e [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md).
 
-Construído com Next.js 15 (App Router), TypeScript, TailwindCSS e PostgreSQL (`pgvector`), o Omni-CRM funciona como um **Servidor MCP (Model Context Protocol)** e um painel visual Kanban E2E.
+Omni-CRM é uma plataforma de gerenciamento e centralização de tarefas, projetos e memórias para múltiplos agentes de IA (Cursor, Codex, OpenClaw, Grok), com evolução prevista para CRM comercial (ICP, leads, copy).
+
+Construído com Next.js (App Router), TypeScript, TailwindCSS e PostgreSQL (`pgvector`). O alvo é funcionar como **Servidor MCP** e painel Kanban ligado ao banco; isso ainda não está persistido.
 
 ---
 
@@ -17,7 +19,7 @@ Construído com Next.js 15 (App Router), TypeScript, TailwindCSS e PostgreSQL (`
 
 ## 🛠️ Tecnologias
 
-- **Framework**: Next.js 15 (React 19, App Router)
+- **Framework**: Next.js 16 (React 19, App Router)
 - **Estilização**: TailwindCSS
 - **Linguagem**: TypeScript
 - **Banco de Dados**: PostgreSQL com extensão `pgvector`
@@ -71,5 +73,8 @@ Para conectar o **Cursor**, adicione no arquivo de configuração do MCP:
 
 ## 📄 Documentação Técnica
 
-- Consulte [SPEC.md](./SPEC.md) para especificações de API, banco de dados e arquitetura.
-- Consulte [AGENTS.md](./AGENTS.md) para diretrizes de integração de cada plataforma de IA.
+- [SPEC.md](./SPEC.md) — API, banco e arquitetura (contrato alvo).
+- [AGENTS.md](./AGENTS.md) — plataformas, ciclo Quanta e papéis de agente.
+- [docs/AUDITORIA.md](./docs/AUDITORIA.md) — o que é real, o que é risco, o que manter.
+- [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md) — execução do kernel até o CRM de vendas.
+- [agents/](./agents/) — playbooks `auditor`, `repair`, `icp`, `lead-capture`, `copywriter`.
