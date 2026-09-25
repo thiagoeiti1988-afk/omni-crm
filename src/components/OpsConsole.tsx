@@ -7,8 +7,8 @@ import type { OpsAgentName, OpsAgentResult } from "@/lib/agents";
 import { BarChart, Funnel, LineChart } from "@/components/charts";
 
 const ORGS = [
-  { label: "Acme Vendas", key: "omni_org_acme_demo" },
-  { label: "Beta Labs", key: "omni_org_beta_demo" },
+  { label: "Acme Vendas", key: "omni_org_acme_demo", harnessKey: "omni_org_acme_harness_demo" },
+  { label: "Beta Labs", key: "omni_org_beta_demo", harnessKey: "omni_org_beta_harness_demo" },
 ];
 
 type Tab =
@@ -65,14 +65,23 @@ export default function OpsConsole() {
   const [agentOut, setAgentOut] = useState<OpsAgentResult | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // O servidor amarra o papel à credencial (ver src/lib/auth.ts) — a agent key
+  // nunca autentica como "human". Selecionar "human" aqui troca de credencial,
+  // não só o header (que agora é só informativo/log).
+  const bearer = useMemo(() => {
+    if (role === "agent") return apiKey;
+    const org = ORGS.find((o) => o.key === apiKey);
+    return org?.harnessKey ?? apiKey;
+  }, [apiKey, role]);
+
   const headers = useMemo(
     () => ({
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${bearer}`,
       "X-Actor-Role": role,
       "X-Agent-Id": role === "human" ? "dashboard-human" : "dashboard-agent",
       "Content-Type": "application/json",
     }),
-    [apiKey, role],
+    [bearer, role],
   );
 
   useEffect(() => {

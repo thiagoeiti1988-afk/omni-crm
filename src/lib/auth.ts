@@ -21,6 +21,14 @@ export class AuthError extends Error {
   }
 }
 
+// O papel (agent/human/harness) nunca vem do header X-Actor-Role sozinho — isso
+// permitiria qualquer chamador se autopromover a "harness" e fechar Quanta ou
+// aprovar copy/ICP sem revisão humana de verdade (ver docs/AUDITORIA.md). O
+// papel é amarrado à credencial que autenticou o request:
+//   - agent key (org.apiKey)       -> sempre "agent", header é ignorado
+//   - harness key (org.harnessKey) -> sempre "harness"
+//   - master key (MCP_API_KEY)     -> operador de confiança; pode escolher
+//                                     human/harness via header (nunca "agent")
 export function authenticate(
   store: OmniStore,
   opts: {
@@ -34,18 +42,26 @@ export function authenticate(
   if (!token) throw new AuthError("Missing Bearer token");
 
   const master = process.env.MCP_API_KEY;
-  const role = parseRole(opts.role);
-  const agentId = opts.agentId?.trim() || `agent-${role}`;
 
   if (master && token === master) {
     const orgId = opts.orgId;
     if (!orgId) throw new AuthError("Master key requires X-Org-Id");
     const org = store.getOrg(orgId);
     if (!org) throw new AuthError("Unknown organization");
+    const requested = parseRole(opts.role);
+    const role = requested === "agent" ? "human" : requested;
+    const agentId = opts.agentId?.trim() || `master-${role}`;
     return { org, role, agentId, isMaster: true };
+  }
+
+  const harnessOrg = store.getOrgByHarnessKey(token);
+  if (harnessOrg) {
+    const agentId = opts.agentId?.trim() || "harness";
+    return { org: harnessOrg, role: "harness", agentId, isMaster: false };
   }
 
   const org = store.getOrgByApiKey(token);
   if (!org) throw new AuthError("Invalid API key");
-  return { org, role, agentId, isMaster: false };
+  const agentId = opts.agentId?.trim() || "agent";
+  return { org, role: "agent", agentId, isMaster: false };
 }

@@ -18,9 +18,18 @@ function withStore(fn: (store: OmniStore) => void | Promise<void>) {
   });
 }
 
+// A partir do fix de auth (role amarrado à credencial, não ao header),
+// "human"/"harness" só autenticam com a harness key da org, nunca com a
+// agent key — ver src/lib/auth.ts.
+const HARNESS_KEYS: Record<string, string> = {
+  omni_org_acme_demo: "omni_org_acme_harness_demo",
+  omni_org_beta_demo: "omni_org_beta_harness_demo",
+};
+
 function orgAuth(store: OmniStore, apiKey: string, role: AuthContext["role"] = "agent"): AuthContext {
+  const token = role === "agent" ? apiKey : (HARNESS_KEYS[apiKey] ?? apiKey);
   return authenticate(store, {
-    authorization: `Bearer ${apiKey}`,
+    authorization: `Bearer ${token}`,
     role,
     agentId: `test-${role}`,
   });
@@ -33,6 +42,44 @@ describe("Omni-CRM kernel", () => {
         () => authenticate(store, { authorization: null }),
         (err: unknown) => err instanceof AuthError,
       );
+    }));
+
+  it("agent key cannot self-escalate role via X-Actor-Role header", () =>
+    withStore((store) => {
+      // Regressão do achado de auditoria: role vinha só do header, então a
+      // própria agent key conseguia se declarar "harness" e fechar Quanta /
+      // aprovar copy sem revisão humana real. authenticate() agora ignora o
+      // header e amarra o role à credencial usada.
+      for (const claimed of ["harness", "human"] as const) {
+        const auth = authenticate(store, {
+          authorization: "Bearer omni_org_acme_demo",
+          role: claimed,
+          agentId: "attacker",
+        });
+        assert.equal(auth.role, "agent", `claimed role "${claimed}" deveria ser ignorado`);
+      }
+      const auth = authenticate(store, {
+        authorization: "Bearer omni_org_acme_demo",
+        role: "harness",
+        agentId: "attacker",
+      });
+      const inReview = store.listTasks(auth.org.id).find((t) => t.status === "in_review")!;
+      assert.throws(
+        () => store.updateTaskStatus(auth, inReview.id, "done"),
+        /Only human or harness/,
+      );
+    }));
+
+  it("harness key authenticates as harness regardless of requested role", () =>
+    withStore((store) => {
+      const auth = authenticate(store, {
+        authorization: "Bearer omni_org_acme_harness_demo",
+        role: "agent",
+        agentId: "harness-runner",
+      });
+      assert.equal(auth.role, "harness");
+      const inReview = store.listTasks(auth.org.id).find((t) => t.status === "in_review")!;
+      assert.equal(store.updateTaskStatus(auth, inReview.id, "done").status, "done");
     }));
 
   it("initialize returns 0.1.0 and official protocol", () =>
