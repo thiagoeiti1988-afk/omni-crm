@@ -6,13 +6,14 @@ import { handleJsonRpc } from "@/lib/mcp";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const store = getStore();
+  // Healthcheck público: nenhum detalhe de infra (ex.: caminho do arquivo
+  // SQLite no disco) deve vazar sem autenticação.
+  getStore();
   return NextResponse.json({
     ok: true,
     transport: "jsonrpc-2.0-post",
     protocol: "2024-11-05",
     serverInfo: { name: "omni-crm-mcp", version: "0.1.0" },
-    db: store.path,
   });
 }
 

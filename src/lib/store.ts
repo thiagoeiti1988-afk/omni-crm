@@ -99,6 +99,7 @@ export class OmniStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         api_key TEXT NOT NULL UNIQUE,
+        harness_key TEXT,
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS projects (
@@ -212,6 +213,14 @@ export class OmniStore {
       CREATE INDEX IF NOT EXISTS idx_leads_org ON leads(org_id, stage);
       CREATE INDEX IF NOT EXISTS idx_logs_org ON agent_logs(org_id);
     `);
+    this.ensureColumns();
+  }
+
+  private ensureColumns(): void {
+    const orgCols = this.db.prepare("PRAGMA table_info(organizations)").all() as Array<{ name: string }>;
+    if (!orgCols.some((c) => c.name === "harness_key")) {
+      this.db.exec("ALTER TABLE organizations ADD COLUMN harness_key TEXT");
+    }
   }
 
   ensureSeed(): void {
@@ -221,6 +230,7 @@ export class OmniStore {
       orgId: "org-acme",
       name: "Acme Vendas",
       apiKey: "omni_org_acme_demo",
+      harnessKey: "omni_org_acme_harness_demo",
       projectId: "proj-acme-outbound",
       projectName: "Outbound B2B",
       persona: true,
@@ -230,6 +240,7 @@ export class OmniStore {
       orgId: "org-beta",
       name: "Beta Labs",
       apiKey: "omni_org_beta_demo",
+      harnessKey: "omni_org_beta_harness_demo",
       projectId: "proj-beta-internal",
       projectName: "Labs interno",
       persona: false,
@@ -241,6 +252,7 @@ export class OmniStore {
     orgId: string;
     name: string;
     apiKey: string;
+    harnessKey: string;
     projectId: string;
     projectName: string;
     persona: boolean;
@@ -248,8 +260,8 @@ export class OmniStore {
   }): void {
     const ts = nowIso();
     this.db.prepare(
-      "INSERT INTO organizations (id, name, api_key, created_at) VALUES (?, ?, ?, ?)",
-    ).run(opts.orgId, opts.name, opts.apiKey, ts);
+      "INSERT INTO organizations (id, name, api_key, harness_key, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(opts.orgId, opts.name, opts.apiKey, opts.harnessKey, ts);
     this.db.prepare(
       `INSERT INTO projects (id, org_id, name, description, platform, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'Cursor', 'active', ?, ?)`,
@@ -387,11 +399,21 @@ export class OmniStore {
     return row ? this.mapOrg(row) : undefined;
   }
 
+  // Credencial separada da agent key: só quem detém a harness key (Harness/OpenClaw,
+  // ou o operador humano até existir login de verdade) autentica como human/harness.
+  getOrgByHarnessKey(harnessKey: string): Organization | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM organizations WHERE harness_key IS NOT NULL AND harness_key = ?",
+    ).get(harnessKey) as Record<string, string> | undefined;
+    return row ? this.mapOrg(row) : undefined;
+  }
+
   private mapOrg(row: Record<string, string>): Organization {
     return {
       id: row.id,
       name: row.name,
       apiKey: row.api_key,
+      harnessKey: row.harness_key ?? null,
       createdAt: row.created_at,
     };
   }
@@ -943,7 +965,11 @@ export class OmniStore {
       "SELECT * FROM agent_logs WHERE org_id = ? ORDER BY created_at DESC LIMIT 20",
     ).all(auth.org.id) as Record<string, string>[];
     return {
-      org: { ...auth.org, apiKey: `${auth.org.apiKey.slice(0, 8)}…` },
+      org: {
+        ...auth.org,
+        apiKey: `${auth.org.apiKey.slice(0, 8)}…`,
+        harnessKey: auth.org.harnessKey ? `${auth.org.harnessKey.slice(0, 8)}…` : null,
+      },
       health: { ok: true, db: "sqlite", mcp: true },
       projects: this.listProjects(auth.org.id),
       tasks: this.listTasks(auth.org.id),

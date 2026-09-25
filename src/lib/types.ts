@@ -14,6 +14,7 @@ export type Organization = {
   id: string;
   name: string;
   apiKey: string;
+  harnessKey: string | null;
   createdAt: string;
 };
 
