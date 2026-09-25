@@ -2,7 +2,7 @@
 
 > **Status: 0.1.0 runtime real (SQLite).** Kanban, MCP, leads, ICP e copy leem/gravam o mesmo banco. Postgres/`pgvector` está no `schema.sql` para migração; o processo local usa `node:sqlite`.
 
-Omni-CRM junta **orquestração de agentes** (Quanta / Kanban / MCP) com **domínio comercial** (organização, pipeline, ICP, lead, copy com Human Review) e **memória vetorial** determinística (1536d) para busca entre agentes.
+Omni-CRM junta **orquestração de agentes** (Quanta / Kanban / MCP) com **domínio comercial** (organização, pipeline, ICP, lead, copy com Human Review), **console de operação** (funil, atribuição de canal, valor esperado, tendência linear/parabólica) e **memória vetorial** para busca entre agentes.
 
 ---
 
@@ -15,7 +15,8 @@ Omni-CRM junta **orquestração de agentes** (Quanta / Kanban / MCP) com **domí
 - `POST /api/tasks` webhook de status (mesmo contrato de transição).
 - Captura `POST /api/leads` com consentimento e dedupe por e-mail.
 - Copy `POST /api/copy` a partir de ICP aprovado + memória; revisão humana.
-- Testes: `npm test` (13 casos de contrato, isolamento, captura, copy).
+- Console Ops: funil, EV por canal, série 14d com ajuste linear e parabólico, próxima jogada, hook `POST /api/agents/run` / tools `get_insights` + `run_ops_agent`.
+- Testes: `npm test`.
 
 ## O que ainda não é produção SaaS
 

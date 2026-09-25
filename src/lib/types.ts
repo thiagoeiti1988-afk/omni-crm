@@ -103,6 +103,7 @@ export type Lead = {
   consent: boolean;
   score: number;
   stage: LeadStage;
+  amount: number;
   externalId: string | null;
   createdAt: string;
 };
@@ -151,4 +152,5 @@ export type DashboardState = {
   leads: Lead[];
   copies: CopyAsset[];
   logs: AgentLog[];
+  insights?: import("./analytics").Insights;
 };
