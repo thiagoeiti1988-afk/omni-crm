@@ -136,3 +136,32 @@ Não é “mais telas”. É:
 6. Log de agente pesquisável por similaridade.  
 7. Zero endpoint de escrita sem auth.  
 8. README descreve só o que o `main` faz.
+
+---
+
+## Placar (27/10/2026)
+
+| Critério de 100% | Estado | Evidência |
+| :--- | :-: | :--- |
+| 1. Contrato MCP oficial em teste automatizado | ✅ | `e2e/api.spec.ts` conecta com `@modelcontextprotocol/sdk` (Streamable HTTP, `2025-11-25`) |
+| 2. Kanban = banco | ✅ | aba Quantas lê `tasks`; E2E confirma Quanta indo para Done após aprovação |
+| 3. Dois tenants isolados | ✅ | E2E "isolamento de tenant"; toda query filtra `org_id` |
+| 4. Lead criado por captura, não SQL | ✅ | formulário público, WhatsApp Cloud API, CSV — todos com teste |
+| 5. Copy com citação de ICP + memória, aprovada por humano | ✅ | `citations` em toda peça; só `copy.review` aprova; E2E ponta a ponta |
+| 6. Log pesquisável por similaridade | ✅ | `search_agent_memory` / aba Memória (lexical local; vendor é opcional futuro) |
+| 7. Zero escrita sem credencial | ✅ | captura exige capture key; webhook exige HMAC; resto exige Bearer ou sessão + Origin |
+| 8. README descreve só o que o `main` faz | ✅ | README reescrito com seção "Limites conhecidos" |
+
+Fase 5 (produção):
+
+| Item | Estado |
+| :--- | :-: |
+| Auth de usuário no painel | ✅ e-mail/senha, sessão httpOnly |
+| RBAC owner / closer / copy / agent-bot | ✅ `src/lib/auth.ts` |
+| Observabilidade (request id, log por request) | ✅ |
+| CI: lint, typecheck, contrato MCP, E2E browser, imagem Docker | ✅ `.github/workflows/ci.yml` |
+| Backup + restore testado | ✅ `scripts/backup.mjs` com `integrity_check`, validado em container |
+| Rate limit no MCP e na captura | ✅ |
+| Runbook | ✅ `docs/RUNBOOK.md` |
+| Embedding configurável sem vendor hardcode | ✅ `EMBEDDING_MODEL`; default local |
+| Multi-instância (Postgres + Redis) | ⏳ próximo ciclo — ver `docs/MERCADO.md` §5 |

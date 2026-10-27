@@ -170,3 +170,20 @@ Não subir agente de copy/lead **antes** de `repair` fechar persistência e auth
 4. Só então ligar captura e geração de copy, com LGPD e RLS.
 
 Detalhamento faseado: [`ROADMAP-0-100.md`](./ROADMAP-0-100.md).
+
+---
+
+## Adendo — ciclo de produção (27/10/2026)
+
+Achados corrigidos neste ciclo, além das features (ver ROADMAP §Placar):
+
+| Achado | Severidade | Correção |
+| :--- | :-: | :--- |
+| `next 16.3.5` com advisory crítico (GHSA-f87g-xv8r-7p7x) + 2 high transitivos | crítico | `next 16.4.3`, `npm audit` = 0 |
+| Console guardava API keys de demo no bundle do browser e escolhia papel por dropdown | alto | login com sessão httpOnly; papel vem do usuário |
+| Recaptura de lead regredia o estágio para `new` | alto | estágio só muda via `updateLeadStage` com RBAC |
+| Template de copy enviava ao cliente o briefing interno, o e-mail do lead e um pitch do próprio Omni-CRM | alto | corpo só com a mensagem; briefing vai para `citations` |
+| `structuredContent` como array e notificação com corpo quebravam clientes MCP oficiais | médio | objeto `{items}`, 202 sem corpo, negociação de versão até `2025-11-25` |
+| Corrida agente × harness na mesma Quanta | médio | compare-and-swap no `UPDATE` (409) |
+| Rate limit por IP lia o 1º valor do `X-Forwarded-For` (forjável) | médio | `X-Real-IP` ou último salto |
+| Healthcheck Docker com porta fixa | baixo | lê `PORT` |

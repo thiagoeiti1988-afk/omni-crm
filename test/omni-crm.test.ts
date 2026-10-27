@@ -126,7 +126,7 @@ describe("Omni-CRM kernel", () => {
         },
         auth,
       );
-      const listed = (payload as { result: { structuredContent: unknown[] } }).result.structuredContent;
+      const listed = (payload as { result: { structuredContent: { items: unknown[] } } }).result.structuredContent.items;
       assert.equal(listed.length, store.listTasks(auth.org.id).length);
     }));
 

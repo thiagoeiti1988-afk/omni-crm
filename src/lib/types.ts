@@ -15,6 +15,8 @@ export type Organization = {
   name: string;
   apiKey: string;
   harnessKey: string | null;
+  captureKey: string | null;
+  whatsappPhoneId: string | null;
   createdAt: string;
 };
 
@@ -101,10 +103,13 @@ export type Lead = {
   source: string;
   utm: string;
   consent: boolean;
+  consentBasis: ConsentBasis | null;
+  consentAt: string | null;
   score: number;
   stage: LeadStage;
   amount: number;
   externalId: string | null;
+  erasedAt: string | null;
   createdAt: string;
 };
 
@@ -134,11 +139,58 @@ export type CopyAsset = {
   createdAt: string;
 };
 
+export type UserRole = "owner" | "closer" | "copy";
+
+export type SessionUser = {
+  id: string;
+  orgId: string;
+  email: string;
+  name: string;
+  role: UserRole;
+};
+
+export type AuthVia = "apikey" | "harness" | "master" | "session" | "capture";
+
 export type AuthContext = {
   org: Organization;
   role: ActorRole;
   agentId: string;
   isMaster: boolean;
+  via?: AuthVia;
+  user?: SessionUser;
+};
+
+export type Permission =
+  | "task.done"
+  | "copy.review"
+  | "icp.approve"
+  | "lead.stage"
+  | "lead.erase"
+  | "lead.export"
+  | "lead.import"
+  | "org.keys"
+  | "billing.view";
+
+export type ConsentBasis = "consent" | "inbound_contact" | "import";
+
+export type BillableKind = "lead_qualified" | "copy_approved" | "deal_won";
+
+export type BillableEvent = {
+  id: string;
+  orgId: string;
+  kind: BillableKind;
+  refId: string;
+  actor: string;
+  createdAt: string;
+};
+
+export type BillingUsage = {
+  month: string;
+  currency: "BRL";
+  baseFeeCents: number;
+  lines: Array<{ kind: BillableKind; count: number; unitCents: number; subtotalCents: number }>;
+  totalCents: number;
+  ledger: BillableEvent[];
 };
 
 export type DashboardState = {
@@ -152,5 +204,6 @@ export type DashboardState = {
   leads: Lead[];
   copies: CopyAsset[];
   logs: AgentLog[];
+  user?: SessionUser;
   insights?: import("./analytics").Insights;
 };

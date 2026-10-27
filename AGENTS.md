@@ -2,14 +2,14 @@
 
 Este documento define os protocolos, comportamentos e padrões de chamada esperados para qualquer Agente de IA que interaja com o sistema **Omni-CRM**.
 
-**Estado do runtime (0.1.0):** MCP oficial (`initialize` / `tools/list` / `tools/call`) persiste no SQLite, Kanban lê o banco, captura de lead e copy com Human Review estão ligados. Auditoria do pack original: [`docs/AUDITORIA.md`](./docs/AUDITORIA.md). Roadmap: [`docs/ROADMAP-0-100.md`](./docs/ROADMAP-0-100.md). Playbooks: [`agents/`](./agents/).
+**Estado do runtime (0.1.0):** MCP Streamable HTTP (`2024-11-05`…`2025-11-25`) persiste no SQLite; painel com login e papéis; captação (formulário público, WhatsApp, CSV), LGPD, Human Review e faturamento por resultado ligados. Contrato da API: [`SPEC.md`](./SPEC.md). Operação: [`docs/RUNBOOK.md`](./docs/RUNBOOK.md). Playbooks: [`agents/`](./agents/).
 
 O Omni-CRM tem dois domínios que **não** devem ser fundidos num único status:
 
 | Domínio | Unidade | Status |
 | :--- | :--- | :--- |
 | Engenharia / agentes (kernel) | Quanta (`tasks`) | `todo` → `in_progress` → `in_review` → `done` |
-| Vendas (ainda não no schema) | Lead / copy | funil comercial + Human Review da peça |
+| Vendas | Lead / copy | funil `new → qualified → nurturing → proposal → won/lost` + Human Review da peça |
 
 ---
 
@@ -41,6 +41,26 @@ Ordem obrigatória: **auditor → repair (P0)** antes de icp / lead-capture / co
 
 ---
 
+## 🔑 Credenciais e o que cada uma pode
+
+O papel vem da **credencial**, nunca de header. `X-Actor-Role` é ignorado para agent/harness key.
+
+| Credencial | Quem usa | Pode | Não pode |
+| :--- | :--- | :--- | :--- |
+| Agent key (`omni_org_…`) | Claude Code, Cursor, Codex via MCP | ler tudo da org; Quanta até `in_review`; captar lead com consentimento; propor ICP (vira draft); criar copy (vai para review) | `done`, aprovar copy/ICP, mover funil, faturar, ler chaves |
+| Harness key (`omni_hns_…`) | CI, OpenClaw, automação de pipeline | fechar Quanta, revisar copy, aprovar ICP, mover funil | ler chaves, faturamento, apagar titular |
+| Capture key (`omni_pub_…`) | formulário do site (pública) | só `POST /api/capture` com consentimento | todo o resto |
+| Sessão humana | painel (owner / closer / copy) | conforme papel — ver `src/lib/auth.ts` | — |
+| Master (`MCP_API_KEY`) | operador da plataforma | provisionar orgs, agir em qualquer org com `X-Org-Id` | nunca entregar a agente |
+
+Mover lead no funil e aprovar peças geram **eventos faturáveis**. Por isso o agente executor não faz nenhuma das duas: ele propõe, uma pessoa (ou harness) decide.
+
+### Como o agente escreve copy
+
+Chame `create_copy_job` com `projectId`, `channel` e, se você for o copywriter, `title` + `body`. A peça herda as citações do ICP aprovado e da memória e entra em `in_review` junto com uma Quanta "Revisar copy". Não peça para aprovar; não reenvie a mesma peça.
+
+---
+
 ## 📡 Convenção de Status de Tarefas (Quanta)
 
 Cada tarefa no Omni-CRM deve respeitar o seguinte ciclo de vida:
@@ -63,7 +83,9 @@ Sempre que um agente concluir uma alteração significativa, ele deve registrar 
 - `agent_id`: Identificador único do agente (ex: `cursor-sonnet-3.5`).
 - `action_type`: Tipo de ação (`CODE_COMMIT`, `REFACTOR`, `BUGFIX`, `ANALYSIS`).
 - `log_content`: Resumo sucinto do que foi alterado.
-- `embedding`: Vetor de 1536 dimensões (gerado via OpenAI Text-Embedding-3 ou similar) para habilitar buscas semânticas futuras por outros agentes.
+- `embedding`: gerado pelo servidor no insert (1536d, `hash-bow-1536` local por padrão). O agente não envia vetor.
+
+Use a tool `append_agent_log` (MCP). Para buscar contexto antes de agir: `search_agent_memory`.
 
 ---
 
