@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS leads (
     consent BOOLEAN NOT NULL DEFAULT FALSE,
     score INTEGER NOT NULL DEFAULT 0,
     stage TEXT NOT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
     external_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     UNIQUE (org_id, email)

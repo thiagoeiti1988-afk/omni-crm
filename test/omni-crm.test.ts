@@ -106,6 +106,8 @@ describe("Omni-CRM kernel", () => {
         "get_icp",
         "search_copy",
         "create_copy_job",
+        "get_insights",
+        "run_ops_agent",
       ]) {
         assert.ok(names.includes(name), name);
       }
@@ -150,7 +152,7 @@ describe("Omni-CRM kernel", () => {
       const beta = orgAuth(store, "omni_org_beta_demo");
       const acmeLeads = store.listLeads(acme.org.id);
       const betaLeads = store.listLeads(beta.org.id);
-      assert.equal(acmeLeads.length, 10);
+      assert.equal(acmeLeads.length, 18);
       assert.equal(betaLeads.length, 2);
       assert.ok(acmeLeads.every((l) => l.orgId === acme.org.id));
       assert.ok(betaLeads.every((l) => l.orgId === beta.org.id));

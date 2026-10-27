@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { embedText, encodeEmbedding, decodeEmbedding, cosine, EMBEDDING_MODEL } from "./embeddings";
+import { buildInsights } from "./analytics";
 import type {
   ActorRole,
   AgentLog,
@@ -180,6 +181,7 @@ export class OmniStore {
         consent INTEGER NOT NULL DEFAULT 0,
         score INTEGER NOT NULL DEFAULT 0,
         stage TEXT NOT NULL,
+        amount INTEGER NOT NULL DEFAULT 0,
         external_id TEXT,
         created_at TEXT NOT NULL,
         UNIQUE (org_id, email),
@@ -217,6 +219,10 @@ export class OmniStore {
   }
 
   private ensureColumns(): void {
+    const leadCols = this.db.prepare("PRAGMA table_info(leads)").all() as Array<{ name: string }>;
+    if (!leadCols.some((c) => c.name === "amount")) {
+      this.db.exec("ALTER TABLE leads ADD COLUMN amount INTEGER NOT NULL DEFAULT 0");
+    }
     const orgCols = this.db.prepare("PRAGMA table_info(organizations)").all() as Array<{ name: string }>;
     if (!orgCols.some((c) => c.name === "harness_key")) {
       this.db.exec("ALTER TABLE organizations ADD COLUMN harness_key TEXT");
@@ -234,7 +240,7 @@ export class OmniStore {
       projectId: "proj-acme-outbound",
       projectName: "Outbound B2B",
       persona: true,
-      leadCount: 10,
+      leadCount: 18,
     });
     this.seedOrg({
       orgId: "org-beta",
@@ -350,27 +356,60 @@ export class OmniStore {
       "Hugo Martins",
       "Iris Pires",
       "João Klein",
+      "Lia Costa",
+      "Marcos Tavares",
+      "Nina Bel",
+      "Otto Faria",
+      "Paula Reis",
+      "Quintino Barros",
+      "Rita Lopes",
+      "Sergio Vale",
+    ];
+    const sourceCycle = ["form", "whatsapp", "ads", "referral"] as const;
+    const stageCycle: LeadStage[] = [
+      "new",
+      "new",
+      "qualified",
+      "nurturing",
+      "proposal",
+      "won",
+      "lost",
+      "qualified",
+      "nurturing",
+      "proposal",
     ];
     const insLead = this.db.prepare(
-      `INSERT INTO leads (id, org_id, project_id, company_id, name, email, phone, source, utm, consent, score, stage, external_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, org_id, project_id, company_id, name, email, phone, source, utm, consent, score, stage, amount, external_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
     );
     for (let i = 0; i < opts.leadCount; i++) {
-      const stage = LEAD_STAGES[i % 4];
+      const stage = stageCycle[i % stageCycle.length];
+      const source = sourceCycle[i % sourceCycle.length];
+      const utm =
+        source === "ads"
+          ? "utm_source=ads&utm_campaign=outbound"
+          : source === "referral"
+            ? "utm_source=referral"
+            : source === "form"
+              ? "utm_source=site"
+              : "";
+      const created = new Date(Date.now() - (opts.leadCount - i) * 86400000).toISOString();
+      const amount = stage === "won" ? 22000 + i * 1500 : stage === "lost" ? 8000 : 4500 + i * 900;
       insLead.run(
         `lead-${opts.orgId}-${i + 1}`,
         opts.orgId,
         opts.projectId,
         companyId,
-        names[i],
-        `${names[i].split(" ")[0].toLowerCase()}@${opts.orgId}.example`,
+        names[i % names.length],
+        `${names[i % names.length].split(" ")[0].toLowerCase()}${i}@${opts.orgId}.example`,
         `1198888${String(1000 + i)}`,
-        i % 2 === 0 ? "form" : "whatsapp",
-        i % 2 === 0 ? "utm_source=site" : "",
-        40 + i * 5,
+        source,
+        utm,
+        35 + i * 3,
         stage,
+        amount,
         `ext-${opts.orgId}-${i + 1}`,
-        ts,
+        created,
       );
     }
 
@@ -382,6 +421,24 @@ export class OmniStore {
       actionType: "CODE_COMMIT",
       logContent:
         "Kernel Omni-CRM: MCP, persistência SQLite, tenancy por org e seed comercial.",
+    });
+    this.appendLogInternal({
+      orgId: opts.orgId,
+      taskId: null,
+      projectId: opts.projectId,
+      agentId: "omni-analyst",
+      actionType: "ANALYSIS",
+      logContent:
+        "Canal WhatsApp converte melhor em qualificação; ads traz volume com score mais baixo. Copy deve citar dor de leads frios.",
+    });
+    this.appendLogInternal({
+      orgId: opts.orgId,
+      taskId: null,
+      projectId: opts.projectId,
+      agentId: "omni-scout",
+      actionType: "ANALYSIS",
+      logContent:
+        "Referral tem menor CAC implícito. Dobrar pedido de indicação após won. Evitar infoproduto (exclusão do ICP).",
     });
   }
 
@@ -699,6 +756,7 @@ export class OmniStore {
       consent: Boolean(row.consent),
       score: Number(row.score),
       stage: row.stage as LeadStage,
+      amount: Number(row.amount ?? 0),
       externalId: row.external_id ? String(row.external_id) : null,
       createdAt: String(row.created_at),
     };
@@ -715,6 +773,7 @@ export class OmniStore {
       utm?: string;
       consent: boolean;
       stage?: LeadStage;
+      amount?: number;
       externalId?: string;
     },
   ): Lead {
@@ -735,12 +794,13 @@ export class OmniStore {
     ) as Record<string, unknown> | undefined;
 
     const score = this.scoreLead(input.source, input.utm ?? "");
+    const amount = input.amount ?? score * 120;
     const stage: LeadStage = input.stage ?? "new";
     if (!LEAD_STAGES.includes(stage)) throw new StoreError("Invalid lead stage", 400);
 
     if (existing) {
       this.db.prepare(
-        `UPDATE leads SET name=?, phone=?, source=?, utm=?, consent=1, score=?, stage=?
+        `UPDATE leads SET name=?, phone=?, source=?, utm=?, consent=1, score=?, stage=?, amount=?
          WHERE id=? AND org_id=?`,
       ).run(
         input.name,
@@ -749,6 +809,7 @@ export class OmniStore {
         input.utm ?? "",
         score,
         stage,
+        amount,
         existing.id,
         auth.org.id,
       );
@@ -761,8 +822,8 @@ export class OmniStore {
     const leadId = id("lead");
     const ts = nowIso();
     this.db.prepare(
-      `INSERT INTO leads (id, org_id, project_id, company_id, name, email, phone, source, utm, consent, score, stage, external_id, created_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+      `INSERT INTO leads (id, org_id, project_id, company_id, name, email, phone, source, utm, consent, score, stage, amount, external_id, created_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
     ).run(
       leadId,
       auth.org.id,
@@ -774,6 +835,7 @@ export class OmniStore {
       input.utm ?? "",
       score,
       stage,
+      amount,
       input.externalId ?? null,
       ts,
     );
@@ -964,6 +1026,10 @@ export class OmniStore {
     const logs = this.db.prepare(
       "SELECT * FROM agent_logs WHERE org_id = ? ORDER BY created_at DESC LIMIT 20",
     ).all(auth.org.id) as Record<string, string>[];
+    const leads = this.listLeads(auth.org.id);
+    const tasks = this.listTasks(auth.org.id);
+    const copies = this.listCopies(auth.org.id);
+    const icp = this.getIcp(auth.org.id) ?? null;
     return {
       org: {
         ...auth.org,
@@ -972,12 +1038,12 @@ export class OmniStore {
       },
       health: { ok: true, db: "sqlite", mcp: true },
       projects: this.listProjects(auth.org.id),
-      tasks: this.listTasks(auth.org.id),
+      tasks,
       pipelines: this.listPipelines(auth.org.id),
       pipelineStages: this.listPipelineStages(auth.org.id),
-      icp: this.getIcp(auth.org.id) ?? null,
-      leads: this.listLeads(auth.org.id),
-      copies: this.listCopies(auth.org.id),
+      icp,
+      leads,
+      copies,
       logs: logs.map((row) => ({
         id: row.id,
         orgId: row.org_id,
@@ -990,6 +1056,7 @@ export class OmniStore {
         embeddingModel: row.embedding_model,
         createdAt: row.created_at,
       })),
+      insights: buildInsights({ leads, tasks, copies, icp }),
     };
   }
 }
