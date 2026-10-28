@@ -16,6 +16,34 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        env:
+          OMNI_LOG: "0"
       - run: npx tsc --noEmit
-      - run: npx eslint src test --max-warnings=0
+      - run: npx eslint src test e2e --max-warnings=0
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: omni-crm:ci
+      - name: Smoke test do container
+        run: |
+          docker run -d --name omni -p 3000:3000 -e OMNI_INSECURE_COOKIES=1 omni-crm:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/api/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:3000/api/health | grep '"ok":true'
+          docker logs omni | tail -5

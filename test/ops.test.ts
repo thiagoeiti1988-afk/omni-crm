@@ -80,10 +80,13 @@ function fakeLead(p: Partial<Lead>): Lead {
     source: "form",
     utm: "",
     consent: true,
+    consentBasis: "consent",
+    consentAt: null,
     score: 50,
     stage: "new",
     amount: 1000,
     externalId: null,
+    erasedAt: null,
     createdAt: new Date().toISOString(),
     ...p,
   };

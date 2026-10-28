@@ -1,0 +1,17 @@
+# Produção mínima: app + volume persistente. Coloque atrás de um proxy TLS
+# (Caddy/nginx/Cloudflare) que defina X-Real-IP — o rate limit depende disso.
+services:
+  omni-crm:
+    build: .
+    image: omni-crm:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      OMNI_DB_PATH: /data/omni-crm.sqlite
+    volumes:
+      - omni-data:/data
+
+volumes:
+  omni-data:

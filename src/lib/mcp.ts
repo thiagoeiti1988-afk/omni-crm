@@ -5,6 +5,12 @@ import { runOpsAgent, type OpsAgentName } from "./agents";
 import type { AuthContext, LeadStage } from "./types";
 
 export const PROTOCOL_VERSION = "2024-11-05";
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+
+const INSTRUCTIONS =
+  "Omni-CRM: CRM com governança de agentes. Você é um agente executor: mova Quantas até in_review, nunca done; " +
+  "capture leads só com consentimento; ao escrever copy, envie title/body em create_copy_job — a peça entra em " +
+  "Human Review e só um humano aprova. Mover lead no funil e aprovar ICP/copy exigem credencial humana ou harness.";
 export const SERVER_VERSION = "0.1.0";
 
 export const TOOLS = [
@@ -66,7 +72,7 @@ export const TOOLS = [
   },
   {
     name: "upsert_lead",
-    description: "Capture or dedupe a lead. Consent is mandatory.",
+    description: "Capture or dedupe a lead. Consent is mandatory; email or phone is required.",
     inputSchema: {
       type: "object",
       properties: {
@@ -80,7 +86,7 @@ export const TOOLS = [
         stage: { type: "string" },
         externalId: { type: "string" },
       },
-      required: ["projectId", "name", "email", "source", "consent"],
+      required: ["projectId", "name", "source", "consent"],
     },
   },
   {
@@ -107,15 +113,32 @@ export const TOOLS = [
   },
   {
     name: "create_copy_job",
-    description: "Generate copy from approved ICP + memory. Lands in Human Review.",
+    description:
+      "Create a copy piece from the approved ICP + memory. Pass your own title/body to act as the copywriter; " +
+      "otherwise a template is used. Always lands in Human Review with ICP/memory citations.",
     inputSchema: {
       type: "object",
       properties: {
         projectId: { type: "string" },
         leadId: { type: "string" },
         channel: { type: "string" },
+        title: { type: "string" },
+        body: { type: "string" },
       },
       required: ["projectId", "channel"],
+    },
+  },
+  {
+    name: "update_lead_stage",
+    description: "Move a lead in the sales funnel (human/harness only; emits billable events).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string" },
+        stage: { type: "string", enum: ["new", "qualified", "nurturing", "proposal", "won", "lost"] },
+        amount: { type: "number" },
+      },
+      required: ["leadId", "stage"],
     },
   },
   {
@@ -167,11 +190,18 @@ function fail(id: JsonRpc["id"], code: number, message: string) {
   return { jsonrpc: "2.0" as const, id: id ?? null, error: { code, message } };
 }
 
+// MCP exige structuredContent como objeto JSON; listas e escalares vão embrulhados.
 function textResult(data: unknown, isError = false) {
+  const structured =
+    data !== null && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : Array.isArray(data)
+        ? { items: data }
+        : { value: data ?? null };
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
     isError,
-    structuredContent: data,
+    structuredContent: structured,
   };
 }
 
@@ -199,18 +229,26 @@ export function handleJsonRpc(
   const method = body.method ?? "";
 
   if (method === "initialize") {
+    const requested = (body.params as { protocolVersion?: string } | undefined)?.protocolVersion;
+    const protocolVersion = !requested
+      ? PROTOCOL_VERSION
+      : (SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+        ? requested
+        : SUPPORTED_PROTOCOL_VERSIONS[0];
     return {
       status: 200,
       payload: ok(body.id, {
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion,
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "omni-crm-mcp", version: SERVER_VERSION },
+        instructions: INSTRUCTIONS,
       }),
     };
   }
 
-  if (method === "notifications/initialized" || method === "initialized") {
-    return { status: 200, payload: ok(body.id, {}) };
+  // Notificações JSON-RPC não têm resposta; no Streamable HTTP o servidor devolve 202 sem corpo.
+  if (method.startsWith("notifications/") || method === "initialized") {
+    return { status: 202, payload: null };
   }
 
   if (method === "ping") {
@@ -295,15 +333,16 @@ export function callTool(
       const projectId = str(args.projectId);
       const leadName = str(args.name);
       const email = str(args.email);
+      const phone = str(args.phone);
       const source = str(args.source);
-      if (!projectId || !leadName || !email || !source) {
-        throw new StoreError("projectId, name, email, source required");
+      if (!projectId || !leadName || (!email && !phone) || !source) {
+        throw new StoreError("projectId, name, email or phone, source required");
       }
       return store.upsertLead(auth, {
         projectId,
         name: leadName,
         email,
-        phone: str(args.phone),
+        phone,
         source,
         utm: str(args.utm),
         consent: args.consent,
@@ -324,11 +363,18 @@ export function callTool(
       const projectId = str(args.projectId);
       const channel = str(args.channel);
       if (!projectId || !channel) throw new StoreError("projectId and channel required");
-      return store.createCopyJob(auth, {
-        projectId,
-        leadId: str(args.leadId),
-        channel,
-      });
+      const body = str(args.body);
+      return store.createCopyJob(
+        auth,
+        { projectId, leadId: str(args.leadId), channel },
+        body ? { title: str(args.title) ?? "", body, author: auth.agentId } : undefined,
+      );
+    }
+    case "update_lead_stage": {
+      const leadId = str(args.leadId);
+      const stage = str(args.stage);
+      if (!leadId || !stage) throw new StoreError("leadId and stage required");
+      return store.updateLeadStage(auth, leadId, stage, typeof args.amount === "number" ? args.amount : undefined);
     }
     case "review_copy": {
       const copyId = str(args.copyId);

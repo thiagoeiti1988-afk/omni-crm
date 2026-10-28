@@ -11,7 +11,9 @@ export function LineChart({
   const h = 200;
   const pad = { l: 36, r: 12, t: 16, b: 28 };
   const ys = series.flatMap((s) => s.values);
-  const max = Math.max(1, ...ys);
+  // Teto par e ≥ 2: os três rótulos do eixo (0, meio, topo) ficam inteiros e distintos.
+  const top = Math.max(2, Math.ceil(Math.max(0, ...ys.filter(Number.isFinite))));
+  const max = top % 2 === 0 ? top : top + 1;
   const innerW = w - pad.l - pad.r;
   const innerH = h - pad.t - pad.b;
   const n = Math.max(1, labels.length - 1);

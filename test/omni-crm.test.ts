@@ -126,7 +126,7 @@ describe("Omni-CRM kernel", () => {
         },
         auth,
       );
-      const listed = (payload as { result: { structuredContent: unknown[] } }).result.structuredContent;
+      const listed = (payload as { result: { structuredContent: { items: unknown[] } } }).result.structuredContent.items;
       assert.equal(listed.length, store.listTasks(auth.org.id).length);
     }));
 
@@ -249,5 +249,20 @@ describe("Omni-CRM kernel", () => {
       const task = store.listTasks(auth.org.id)[0];
       const got = callTool(store, auth, "get_task_status", { taskId: task.id }) as { id: string };
       assert.equal(got.id, task.id);
+    }));
+
+  it("upsert_lead via MCP aceita lead só com telefone", () =>
+    withStore((store) => {
+      const auth = orgAuth(store, "omni_org_acme_demo");
+      const projectId = store.listProjects(auth.org.id)[0].id;
+      const lead = callTool(store, auth, "upsert_lead", {
+        projectId, name: "Só Telefone", phone: "+5511988887777", source: "whatsapp", consent: true,
+      }) as { phone: string; email: string };
+      assert.equal(lead.phone, "+5511988887777");
+      assert.equal(lead.email, "");
+      assert.throws(
+        () => callTool(store, auth, "upsert_lead", { projectId, name: "Sem contato", source: "form", consent: true }),
+        /email or phone/,
+      );
     }));
 });

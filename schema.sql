@@ -1,11 +1,15 @@
 -- Omni-CRM schema (Postgres / Supabase target)
 -- Runtime atual usa SQLite equivalente em src/lib/store.ts (node:sqlite).
+-- Espelha o schema v2 do SQLite (PRAGMA user_version = 2): login, LGPD, faturamento, WhatsApp.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     api_key TEXT NOT NULL UNIQUE,
+    harness_key TEXT,
+    capture_key TEXT,
+    whatsapp_phone_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
@@ -87,17 +91,21 @@ CREATE TABLE IF NOT EXISTS leads (
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    phone TEXT,
+    email TEXT,  -- nulo para lead só com telefone (WhatsApp) e após anonimização
+    phone TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL,
-    utm TEXT,
+    utm TEXT NOT NULL DEFAULT '',
     consent BOOLEAN NOT NULL DEFAULT FALSE,
+    consent_basis TEXT CHECK (consent_basis IN ('consent', 'inbound_contact', 'import')),
+    consent_at TIMESTAMPTZ,
     score INTEGER NOT NULL DEFAULT 0,
     stage TEXT NOT NULL,
     amount INTEGER NOT NULL DEFAULT 0,
     external_id TEXT,
+    erased_at TIMESTAMPTZ,  -- LGPD: titular anonimizado; fora de toda listagem
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    UNIQUE (org_id, email)
+    UNIQUE (org_id, email),
+    UNIQUE (org_id, external_id)
 );
 
 CREATE TABLE IF NOT EXISTS lead_events (
@@ -106,6 +114,7 @@ CREATE TABLE IF NOT EXISTS lead_events (
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     payload TEXT NOT NULL,
+    dedupe_key TEXT,  -- id da mensagem do WhatsApp: reentrega não duplica
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
@@ -126,9 +135,39 @@ CREATE TABLE IF NOT EXISTS copy_assets (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'closer', 'copy')),
+    password_hash TEXT NOT NULL,  -- scrypt
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,  -- sha256 do token; o token só existe no cookie
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE TABLE IF NOT EXISTS billable_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('lead_qualified', 'copy_approved', 'deal_won')),
+    ref_id TEXT NOT NULL,  -- sem FK: sobrevive à anonimização do lead
+    actor TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE (org_id, kind, ref_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_org ON tasks(org_id, status);
 CREATE INDEX IF NOT EXISTS idx_leads_org ON leads(org_id, stage);
 CREATE INDEX IF NOT EXISTS idx_logs_org ON agent_logs(org_id);
+CREATE INDEX IF NOT EXISTS idx_billable_org ON billable_events(org_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_events_dedupe ON lead_events(org_id, dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_logs_embedding_idx ON agent_logs USING hnsw (embedding vector_cosine_ops)
     WHERE embedding IS NOT NULL;
 
@@ -139,3 +178,7 @@ ALTER TABLE agent_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE icp_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE copy_assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lead_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billable_events ENABLE ROW LEVEL SECURITY;

@@ -1,95 +1,73 @@
-# Omni-CRM: Hub de agentes + CRM de vendas
+# Omni-CRM
 
-> **Status: 0.1.0 runtime real (SQLite).** Kanban, MCP, leads, ICP e copy leem/gravam o mesmo banco. Postgres/`pgvector` está no `schema.sql` para migração; o processo local usa `node:sqlite`.
+**CRM de vendas com governança de agentes de IA.** Agentes (Claude Code, Cursor, automações) captam, qualificam e escrevem; pessoas aprovam; tudo fica auditável — e a cobrança é por resultado comprovado.
 
-Omni-CRM junta **orquestração de agentes** (Quanta / Kanban / MCP) com **domínio comercial** (organização, pipeline, ICP, lead, copy com Human Review), **console de operação** (funil, atribuição de canal, valor esperado, tendência linear/parabólica) e **memória vetorial** para busca entre agentes.
+> Status `0.1.0` · produção em instância única (SQLite). 41 testes unitários + 18 E2E em browser real. Ver [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md).
 
----
+## Por que existe
 
-## O que está implementado
+CRMs com IA já expõem MCP (HubSpot, Attio, Salesforce, Pipedrive). O que nenhum resolve bem é **quem pode o quê**: um agente que escreve a mensagem não pode ser o mesmo que aprova o envio, move o negócio para "ganho" ou gera cobrança. O Omni-CRM faz disso o produto. Análise completa: [docs/MERCADO.md](./docs/MERCADO.md).
 
-- MCP JSON-RPC 2.0 em `POST /api/mcp-server`: `initialize`, `tools/list`, `tools/call`, `ping` (aliases `mcp.*` ainda respondem).
-- Auth obrigatória: `Authorization: Bearer <org api key>`. Writes sem token → 401.
-- Tenancy: duas orgs seed (`Acme` / `Beta`) isoladas.
-- Kanban = tabela `tasks` (counts reais; ponto MCP verde só com `/api/health`).
-- `POST /api/tasks` webhook de status (mesmo contrato de transição).
-- Captura `POST /api/leads` com consentimento e dedupe por e-mail.
-- Copy `POST /api/copy` a partir de ICP aprovado + memória; revisão humana.
-- Console Ops: funil, EV por canal, série 14d com ajuste linear e parabólico, próxima jogada, hook `POST /api/agents/run` / tools `get_insights` + `run_ops_agent`.
-- Testes: `npm test`.
+## O que funciona hoje
 
-## O que ainda não é produção SaaS
+| Área | O que faz |
+| :--- | :--- |
+| **Governança** | Papel amarrado à credencial (agent key, harness key, sessão humana, master). Agente move Quanta até `in_review`, nunca `done`; não aprova copy/ICP, não move funil, não fatura. Matriz em `src/lib/auth.ts`. |
+| **Painel humano** | Login e-mail/senha (scrypt, cookie httpOnly, CSRF por Origin), papéis **owner / closer / copy**. Operação, funil, leads, Quantas, Human Review, ICP, memória, agentes, faturamento, integrações. |
+| **MCP** | Streamable HTTP (JSON), versões `2024-11-05` a `2025-11-25`, 14 tools. Testado com o cliente oficial `@modelcontextprotocol/sdk`. |
+| **Captação** | Formulário público embutível (funciona sem JS, honeypot, rate limit, consentimento obrigatório), WhatsApp Cloud API (webhook assinado, dedupe de reentrega), importação CSV de RD/Ploomes/Kommo. |
+| **LGPD** | Base legal por lead (`consent`, `inbound_contact`, `import`), exportação (art. 18, II) e anonimização (art. 18, VI) do titular. |
+| **Copy** | Gerada de ICP aprovado + memória, com citações. Rascunho pelo agente via MCP, por Claude (opcional) ou template. Sempre cai em Human Review. |
+| **RESaaS** | Faturamento por evento auditável e idempotente: lead qualificado com consentimento, peça aprovada, negócio ganho. Preços por env. |
+| **Operação** | Request id, log JSON por request, healthcheck real, rate limit, CAS em transição de status, backup online, imagem Docker não-root. |
 
-- Auth de usuário (e-mail/senha) — hoje a UI usa API keys de demo.
-- Postgres vivo + RLS no Supabase (schema preparado, runtime SQLite).
-- Embeddings de vendor (OpenAI); o RAG local é hash bag-of-words 1536d.
-- Transporte MCP Streamable HTTP/SSE do SDK; o Cursor deve POSTar JSON-RPC com Bearer.
-
----
-
-## Tecnologias
-
-- Next.js 16, React 19, Tailwind 4, TypeScript
-- Persistência: SQLite (`node:sqlite`) · alvo: PostgreSQL + pgvector (`schema.sql`)
-- MCP JSON-RPC 2.0
-
----
-
-## Como rodar
+## Rodar
 
 ```bash
-git clone https://github.com/thiagoeiti1988-afk/omni-crm.git
-cd omni-crm
 npm install
 cp .env.example .env
-npm test
-npm run dev
+npm run dev            # http://localhost:3000
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). Troque a org no seletor (Acme vs Beta) para ver isolamento.
+Demo (seed automático): `owner@acme.demo`, `closer@acme.demo`, `copy@acme.demo`, `owner@beta.demo` — senha `omni-demo-2026`. A tela de login tem atalhos.
 
-Chaves de demo (seed automático):
-
-| Org | Bearer |
-| :--- | :--- |
-| Acme Vendas | `omni_org_acme_demo` |
-| Beta Labs | `omni_org_beta_demo` |
-
-Headers extras: `X-Actor-Role: agent|human|harness`, `X-Agent-Id: ...`.  
-`done` e aprovação de copy só com `human` ou `harness`.
-
-### MCP (Cursor)
-
-```json
-{
-  "mcpServers": {
-    "omni-crm": {
-      "url": "http://localhost:3000/api/mcp-server",
-      "headers": {
-        "Authorization": "Bearer omni_org_acme_demo",
-        "X-Actor-Role": "agent",
-        "X-Agent-Id": "cursor-agent"
-      }
-    }
-  }
-}
-```
-
-Exemplo:
+### Produção (Docker)
 
 ```bash
-curl -s http://localhost:3000/api/mcp-server \
-  -H 'Authorization: Bearer omni_org_acme_demo' \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+cp .env.example .env   # OMNI_SEED_DEMO=0 + OMNI_BOOTSTRAP_* + MCP_API_KEY forte
+docker compose up -d --build
 ```
 
----
+Coloque atrás de um proxy TLS que defina `X-Real-IP`. Passo a passo, backup, rotação de chaves e incidentes: [docs/RUNBOOK.md](./docs/RUNBOOK.md).
+
+### Conectar um agente (MCP)
+
+Pegue a chave de agente em **Integrações** (owner) e:
+
+```bash
+claude mcp add --transport http omni-crm https://SEU_DOMINIO/api/mcp-server \
+  --header "Authorization: Bearer <agent key>"
+```
+
+Cursor: `{"mcpServers":{"omni-crm":{"url":"https://SEU_DOMINIO/api/mcp-server","headers":{"Authorization":"Bearer <agent key>"}}}}`
+
+## Testes
+
+```bash
+npm test                                   # 41 unitários (store, RBAC, LGPD, CSV, WhatsApp, MCP, copywriter)
+npm run build && npx playwright test       # 18 E2E: browser real + HTTP + cliente MCP oficial
+npm run verify                             # tudo, na ordem do CI
+```
+
+Em ambiente com Chromium pré-instalado de outra versão: `E2E_CHROMIUM_PATH=/caminho/chrome npx playwright test`.
+
+## Limites conhecidos (honestos)
+
+- **Instância única.** SQLite + rate limit em memória. Escala horizontal exige Postgres (o alvo está em `schema.sql`) e Redis.
+- **Embeddings locais** (`hash-bow-1536`): busca lexical, não semântica de vendor.
+- **WhatsApp só inbound.** Envio de mensagem aprovada pela Cloud API é o próximo passo.
+- **MCP sem OAuth** — Bearer por org. Suficiente para Claude Code/Cursor; OAuth é exigido para conectores de diretório.
 
 ## Documentação
 
-- [SPEC.md](./SPEC.md) — API, schema, tools
-- [AGENTS.md](./AGENTS.md) — ciclo Quanta e papéis
-- [docs/AUDITORIA.md](./docs/AUDITORIA.md) — leitura do pack original
-- [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md) — critérios de 100%
-- [agents/](./agents/) — auditor, repair, icp, lead-capture, copywriter
+[SPEC.md](./SPEC.md) (API e schema) · [AGENTS.md](./AGENTS.md) (protocolo para agentes) · [docs/RUNBOOK.md](./docs/RUNBOOK.md) · [docs/MERCADO.md](./docs/MERCADO.md) · [docs/AUDITORIA.md](./docs/AUDITORIA.md) · [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md)
