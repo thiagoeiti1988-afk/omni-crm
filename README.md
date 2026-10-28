@@ -14,11 +14,12 @@ CRMs com IA já expõem MCP (HubSpot, Attio, Salesforce, Pipedrive). O que nenhu
 | :--- | :--- |
 | **Governança** | Papel amarrado à credencial (agent key, harness key, sessão humana, master). Agente move Quanta até `in_review`, nunca `done`; não aprova copy/ICP, não move funil, não fatura. Matriz em `src/lib/auth.ts`. |
 | **Painel humano** | Login e-mail/senha (scrypt, cookie httpOnly, CSRF por Origin), papéis **owner / closer / copy**. Operação, funil, leads, Quantas, Human Review, ICP, memória, agentes, faturamento, integrações. |
+| **Human Review** | Peça mostrada no formato do canal (balão de WhatsApp, e-mail com assunto) e com as fontes. Teclado: **A** aprova, **R** rejeita, **J/K** navega, **U** desfaz nos 5 s antes de ir ao servidor. Aviso "N peças aguardando você" no topo. |
 | **MCP** | Streamable HTTP (JSON), versões `2024-11-05` a `2025-11-25`, 14 tools. Testado com o cliente oficial `@modelcontextprotocol/sdk`. |
 | **Captação** | Formulário público embutível (funciona sem JS, honeypot, rate limit, consentimento obrigatório), WhatsApp Cloud API (webhook assinado, dedupe de reentrega), importação CSV de RD/Ploomes/Kommo. |
 | **LGPD** | Base legal por lead (`consent`, `inbound_contact`, `import`), exportação (art. 18, II) e anonimização (art. 18, VI) do titular. |
 | **Copy** | Gerada de ICP aprovado + memória, com citações. Rascunho pelo agente via MCP, por Claude (opcional) ou template. Sempre cai em Human Review. |
-| **RESaaS** | Faturamento por evento auditável e idempotente: lead qualificado com consentimento, peça aprovada, negócio ganho. Preços por env. |
+| **RESaaS** | Faturamento por evento auditável e idempotente: lead qualificado com consentimento, peça aprovada, negócio ganho. Extrato com o que foi cobrado, referente a quê e quem decidiu; barras por dia. Preços por env. |
 | **Operação** | Request id, log JSON por request, healthcheck real, rate limit, CAS em transição de status, backup online, imagem Docker não-root. |
 
 ## Rodar
@@ -54,10 +55,13 @@ Cursor: `{"mcpServers":{"omni-crm":{"url":"https://SEU_DOMINIO/api/mcp-server","
 ## Testes
 
 ```bash
-npm test                                   # 41 unitários (store, RBAC, LGPD, CSV, WhatsApp, MCP, copywriter)
-npm run build && npx playwright test       # 18 E2E: browser real + HTTP + cliente MCP oficial
+npm test                                   # 43 unitários (store, RBAC, LGPD, CSV, WhatsApp, MCP, copywriter)
+npm run build && npx playwright test       # 19 E2E: browser real + HTTP + cliente MCP oficial
 npm run verify                             # tudo, na ordem do CI
+npm run simulate                           # roteiro da demo contra um servidor rodando (agente + harness via MCP)
 ```
+
+Teste simulado, prompt para pedir a um agente (Cursor, Claude Code) testar e telas: [docs/TESTES.md](./docs/TESTES.md).
 
 Em ambiente com Chromium pré-instalado de outra versão: `E2E_CHROMIUM_PATH=/caminho/chrome npx playwright test`.
 
@@ -70,4 +74,4 @@ Em ambiente com Chromium pré-instalado de outra versão: `E2E_CHROMIUM_PATH=/ca
 
 ## Documentação
 
-[SPEC.md](./SPEC.md) (API e schema) · [AGENTS.md](./AGENTS.md) (protocolo para agentes) · [docs/RUNBOOK.md](./docs/RUNBOOK.md) · [docs/MERCADO.md](./docs/MERCADO.md) · [docs/AUDITORIA.md](./docs/AUDITORIA.md) · [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md)
+[SPEC.md](./SPEC.md) (API e schema) · [AGENTS.md](./AGENTS.md) (protocolo para agentes) · [docs/RUNBOOK.md](./docs/RUNBOOK.md) · [docs/TESTES.md](./docs/TESTES.md) · [docs/MERCADO.md](./docs/MERCADO.md) · [docs/AUDITORIA.md](./docs/AUDITORIA.md) · [docs/ROADMAP-0-100.md](./docs/ROADMAP-0-100.md)

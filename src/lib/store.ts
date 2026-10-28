@@ -1173,11 +1173,15 @@ export class OmniStore {
 
   searchCopy(orgId: string, query: string, limit = 5): Array<CopyAsset & { score: number }> {
     const q = embedText(query);
-    return this.listCopies(orgId)
-      .map((asset) => ({
-        ...asset,
-        score: asset.embedding ? cosine(q, asset.embedding) : 0,
-      }))
+    const rows = this.db.prepare("SELECT * FROM copy_assets WHERE org_id = ? ORDER BY created_at DESC").all(orgId) as Record<
+      string,
+      unknown
+    >[];
+    return rows
+      .map((row) => {
+        const vector = decodeEmbedding(row.embedding ? String(row.embedding) : null);
+        return { ...this.mapCopy(row), score: vector ? cosine(q, vector) : 0 };
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }
@@ -1196,7 +1200,8 @@ export class OmniStore {
       citations: String(row.citations),
       status: row.status as CopyStatus,
       version: Number(row.version),
-      embedding: decodeEmbedding(row.embedding ? String(row.embedding) : null),
+      // O vetor (1536 números) fica no banco: devolvê-lo enchia o contexto do agente via MCP e o payload do painel.
+      embedding: null,
       createdAt: String(row.created_at),
     };
   }
@@ -1480,9 +1485,7 @@ export class OmniStore {
     requirePerm(auth, "lead.export", "Only owner or closer may export personal data");
     const lead = this.getLead(auth.org.id, leadId);
     if (!lead) throw new StoreError("Lead not found", 404);
-    const copies = this.listCopies(auth.org.id)
-      .filter((c) => c.leadId === leadId)
-      .map((c) => ({ ...c, embedding: null }));
+    const copies = this.listCopies(auth.org.id).filter((c) => c.leadId === leadId);
     return { lead, events: this.listLeadEvents(auth.org.id, leadId), copies, exportedAt: nowIso() };
   }
 

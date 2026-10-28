@@ -10,6 +10,7 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
+    "simulate": "node scripts/simulate.mjs",
     "verify": "npm test && tsc --noEmit && eslint src test e2e --max-warnings=0 && next build && playwright test"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   BillingUsage,
   CopyAsset,
@@ -58,6 +58,10 @@ const COLUMNS: Array<{ status: TaskStatus; title: string }> = [
   { status: "done", title: "Done" },
 ];
 
+const UNDO_MS = 5000;
+
+type PendingDecision = { copy: CopyAsset; decision: "approved" | "rejected"; startedAt: number; timer: number };
+
 const BILL_LABEL: Record<string, string> = {
   lead_qualified: "Lead qualificado (com consentimento)",
   copy_approved: "Peça aprovada no Human Review",
@@ -100,6 +104,10 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
   const [notice, setNotice] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("operacao");
   const [busy, setBusy] = useState<string | null>(null);
+  // Decisão de review fica UNDO_MS no cliente antes de ir ao servidor: aprovar gera cobrança e fecha a Quanta,
+  // então o "desfazer" precisa acontecer antes da chamada, não depois.
+  const [pending, setPending] = useState<PendingDecision | null>(null);
+  const pendingRef = useRef<PendingDecision | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -135,6 +143,54 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
     }
   }
 
+  async function commitReview(decision: PendingDecision) {
+    if (pendingRef.current?.copy.id !== decision.copy.id) return;
+    window.clearTimeout(decision.timer);
+    pendingRef.current = null;
+    setPending(null);
+    await act(
+      `review:${decision.copy.id}`,
+      () => call("/api/copy", { method: "POST", body: JSON.stringify({ copyId: decision.copy.id, decision: decision.decision }) }),
+      decision.decision === "approved" ? "Peça aprovada — Quanta fechada." : "Peça rejeitada — Quanta volta para In Progress.",
+    );
+  }
+
+  function decide(copy: CopyAsset, decision: "approved" | "rejected") {
+    // Uma decisão por vez: a anterior é confirmada antes de abrir a próxima janela de desfazer.
+    if (pendingRef.current) void commitReview(pendingRef.current);
+    const next: PendingDecision = { copy, decision, startedAt: Date.now(), timer: 0 };
+    next.timer = window.setTimeout(() => void commitReview(next), UNDO_MS);
+    pendingRef.current = next;
+    setPending(next);
+    setNotice(null);
+  }
+
+  function undo() {
+    const current = pendingRef.current;
+    if (!current) return;
+    window.clearTimeout(current.timer);
+    pendingRef.current = null;
+    setPending(null);
+    setNotice(`Decisão desfeita: "${current.copy.title}" voltou para a fila.`);
+  }
+
+  useEffect(() => {
+    // Fechar a aba não pode perder a decisão: envia o que estiver pendente.
+    const flush = () => {
+      const current = pendingRef.current;
+      if (!current) return;
+      void fetch("/api/copy", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ copyId: current.copy.id, decision: current.decision }),
+      });
+      pendingRef.current = null;
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
@@ -143,7 +199,8 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
 
   const insights: Insights | undefined = state?.insights;
   const visibleTabs = TABS.filter((t) => !t.perm || can(t.perm));
-  const reviewQueue = state?.copies.filter((c) => c.status === "in_review") ?? [];
+  const reviewQueue = state?.copies.filter((c) => c.status === "in_review" && c.id !== pending?.copy.id) ?? [];
+  const leadNames = new Map(state?.leads.map((l) => [l.id, l.name]) ?? []);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col md:flex-row">
@@ -172,7 +229,19 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
 
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="flex flex-wrap gap-3 items-center justify-between border-b border-zinc-800 px-6 py-3">
-          <p className="text-sm text-zinc-400">Agentes propõem · pessoas aprovam · tudo auditável</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-zinc-400">Agentes propõem · pessoas aprovam · tudo auditável</p>
+            {can("copy.review") && reviewQueue.length > 0 && tab !== "copy" && (
+              <button
+                type="button"
+                onClick={() => setTab("copy")}
+                className="text-xs rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-3 py-1 hover:bg-amber-500/25"
+                data-testid="review-waiting"
+              >
+                {reviewQueue.length === 1 ? "1 peça aguardando você" : `${reviewQueue.length} peças aguardando você`}
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2 items-center text-sm">
             <span className="border border-zinc-700 rounded px-3 py-1.5" title="Saúde do banco e do servidor MCP">
               <span className={health?.ok ? "text-emerald-400" : "text-rose-400"}>●</span> MCP {health?.ok ? "Online" : "Offline"}
@@ -238,16 +307,14 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
           {tab === "quantas" && state && <Quantas tasks={state.tasks} />}
           {tab === "copy" && state && (
             <Review
-              copies={state.copies}
+              queue={reviewQueue}
+              decided={state.copies.filter((c) => c.status !== "in_review")}
+              leadNames={leadNames}
               canReview={can("copy.review")}
               busy={busy}
-              onReview={(copy, decision) =>
-                act(
-                  `review:${copy.id}`,
-                  () => call("/api/copy", { method: "POST", body: JSON.stringify({ copyId: copy.id, decision }) }),
-                  decision === "approved" ? "Peça aprovada — Quanta fechada." : "Peça rejeitada — Quanta volta para In Progress.",
-                )
-              }
+              onReview={decide}
+              onUndo={undo}
+              hasPending={pending !== null}
             />
           )}
           {tab === "icp" && state && (
@@ -265,9 +332,10 @@ export default function OpsConsole({ user, orgName }: { user: SessionUser; orgNa
           )}
           {tab === "memoria" && state && <Memoria state={state} />}
           {tab === "agentes" && <Agentes onRun={reload} />}
-          {tab === "faturamento" && can("billing.view") && <Faturamento />}
+          {tab === "faturamento" && can("billing.view") && state && <Faturamento state={state} />}
           {tab === "integracoes" && can("org.keys") && <Integracoes />}
         </main>
+        {pending && <UndoToast pending={pending} onUndo={undo} onConfirm={() => void commitReview(pending)} />}
       </div>
     </div>
   );
@@ -563,46 +631,205 @@ function Quantas({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function Review(props: { copies: CopyAsset[]; canReview: boolean; busy: string | null; onReview: (copy: CopyAsset, d: "approved" | "rejected") => void }) {
-  const queue = props.copies.filter((c) => c.status === "in_review");
-  const done = props.copies.filter((c) => c.status !== "in_review").slice(0, 12);
+function citationLabels(citations: string): Array<{ label: string; ref: string }> {
+  const refs = citations.split(",").filter(Boolean);
+  const memory = refs.filter((r) => r.startsWith("log:"));
+  const out: Array<{ label: string; ref: string }> = [];
+  for (const ref of refs) {
+    if (ref.startsWith("icp:")) out.push({ label: "ICP aprovado", ref });
+    if (ref.startsWith("lead:")) out.push({ label: "Dados do lead", ref });
+  }
+  if (memory.length) out.push({ label: memory.length === 1 ? "1 memória do time" : `${memory.length} memórias do time`, ref: memory.join(",") });
+  return out;
+}
+
+function Review(props: {
+  queue: CopyAsset[];
+  decided: CopyAsset[];
+  leadNames: Map<string, string>;
+  canReview: boolean;
+  busy: string | null;
+  hasPending: boolean;
+  onReview: (copy: CopyAsset, d: "approved" | "rejected") => void;
+  onUndo: () => void;
+}) {
+  const { queue, canReview, onReview, onUndo } = props;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const index = Math.max(0, queue.findIndex((c) => c.id === selectedId));
+  const current = queue[index];
+
+  useEffect(() => {
+    if (!canReview) return;
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      if (e.metaKey || e.ctrlKey || e.altKey || el?.closest("input, textarea, select, [contenteditable]")) return;
+      const key = e.key.toLowerCase();
+      if (key === "u") {
+        e.preventDefault();
+        onUndo();
+        return;
+      }
+      if (!current) return;
+      if (key === "a") onReview(current, "approved");
+      else if (key === "r") onReview(current, "rejected");
+      else if (key === "j") setSelectedId(queue[Math.min(queue.length - 1, index + 1)].id);
+      else if (key === "k") setSelectedId(queue[Math.max(0, index - 1)].id);
+      else return;
+      e.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canReview, current, index, queue, onReview, onUndo]);
+
   return (
     <section className="space-y-6">
-      <div>
-        <h2 className="text-sm font-medium mb-1">Fila de revisão ({queue.length})</h2>
-        <p className="text-xs text-zinc-500 mb-3">
-          Nenhuma peça sai sem aprovação humana. Cada uma cita o ICP e a memória que a geraram.
-          {!props.canReview && " Seu papel pode ler, mas não aprovar."}
-        </p>
-        {queue.length === 0 && <p className="text-sm text-zinc-500">Fila vazia.</p>}
-        <ul className="grid md:grid-cols-2 gap-3">
-          {queue.map((copy) => (
-            <CopyCard key={copy.id} copy={copy}>
-              {props.canReview && (
-                <div className="flex gap-2 mt-3">
-                  <button type="button" disabled={props.busy === `review:${copy.id}`} className="bg-emerald-700 hover:bg-emerald-600 px-3 py-1 rounded" onClick={() => props.onReview(copy, "approved")}>
-                    Aprovar
-                  </button>
-                  <button type="button" disabled={props.busy === `review:${copy.id}`} className="bg-rose-900 hover:bg-rose-800 px-3 py-1 rounded" onClick={() => props.onReview(copy, "rejected")}>
-                    Rejeitar
-                  </button>
-                </div>
-              )}
-            </CopyCard>
-          ))}
-        </ul>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium mb-1">Fila de revisão ({queue.length})</h2>
+          <p className="text-xs text-zinc-500 max-w-2xl">
+            Nenhuma peça sai sem aprovação humana. Cada uma mostra as fontes que a geraram.
+            {!canReview && " Seu papel pode ler, mas não aprovar."}
+          </p>
+        </div>
+        {canReview && queue.length > 0 && (
+          <p className="text-[11px] text-zinc-500" aria-label="Atalhos de teclado">
+            <Kbd>A</Kbd> aprovar · <Kbd>R</Kbd> rejeitar · <Kbd>J</Kbd>/<Kbd>K</Kbd> próxima/anterior · <Kbd>U</Kbd> desfazer
+          </p>
+        )}
       </div>
-      {done.length > 0 && (
+
+      {queue.length === 0 && <p className="text-sm text-zinc-500">Fila vazia. Nada aguardando você.</p>}
+
+      {current && (
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_16rem] gap-4">
+          <article
+            className="border border-amber-500/40 rounded-xl p-4 bg-zinc-900/40 space-y-4"
+            data-testid={`copy-${current.id}`}
+            aria-label={`Peça em revisão: ${current.title}`}
+          >
+            <header className="flex flex-wrap justify-between gap-2 items-center">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.15em] text-amber-300">Aguardando sua aprovação</p>
+                <h3 className="text-base font-medium mt-1">{current.title}</h3>
+              </div>
+              <span className="text-xs text-zinc-400">
+                {current.channel}
+                {current.leadId && props.leadNames.get(current.leadId) ? ` · ${props.leadNames.get(current.leadId)}` : ""}
+              </span>
+            </header>
+            <ChannelPreview copy={current} />
+            <div className="flex flex-wrap gap-2 text-[11px]" aria-label="Fontes">
+              {citationLabels(current.citations).map((c) => (
+                <span key={c.ref} title={c.ref} className="rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20 px-2 py-0.5">
+                  Fonte: {c.label}
+                </span>
+              ))}
+            </div>
+            {canReview && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={props.busy === `review:${current.id}`}
+                  className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm font-medium"
+                  onClick={() => onReview(current, "approved")}
+                >
+                  Aprovar <Kbd>A</Kbd>
+                </button>
+                <button
+                  type="button"
+                  disabled={props.busy === `review:${current.id}`}
+                  className="border border-rose-800 text-rose-300 hover:bg-rose-950 px-4 py-2 rounded-lg text-sm"
+                  onClick={() => onReview(current, "rejected")}
+                >
+                  Rejeitar <Kbd>R</Kbd>
+                </button>
+              </div>
+            )}
+          </article>
+          {queue.length > 1 && (
+            <ol className="space-y-1 text-xs" aria-label="Próximas na fila">
+              {queue.map((copy, i) => (
+                <li key={copy.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(copy.id)}
+                    aria-current={i === index ? "true" : undefined}
+                    className={`w-full text-left rounded-lg px-3 py-2 border ${i === index ? "border-amber-500/40 bg-zinc-900" : "border-zinc-800 hover:bg-zinc-900"}`}
+                  >
+                    <span className="block truncate text-zinc-200">{copy.title}</span>
+                    <span className="text-zinc-500">{copy.channel}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {props.decided.length > 0 && (
         <div>
           <h2 className="text-sm font-medium mb-3">Decididas recentemente</h2>
           <ul className="grid md:grid-cols-3 gap-3">
-            {done.map((copy) => (
+            {props.decided.slice(0, 12).map((copy) => (
               <CopyCard key={copy.id} copy={copy} />
             ))}
           </ul>
         </div>
       )}
     </section>
+  );
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="font-mono text-[10px] border border-current/40 rounded px-1 opacity-80">{children}</kbd>;
+}
+
+/** Mostra a peça como o cliente final vai ver: balão de WhatsApp ou e-mail com assunto. */
+function ChannelPreview({ copy }: { copy: CopyAsset }) {
+  if (copy.channel === "whatsapp") {
+    return (
+      <div className="rounded-lg bg-[#0b141a] p-3">
+        <p className="ml-auto max-w-md rounded-lg rounded-tr-sm bg-[#005c4b] text-[#e9edef] px-3 py-2 text-sm whitespace-pre-wrap">{copy.body}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 text-sm">
+      <p className="border-b border-zinc-800 px-3 py-2 text-zinc-400">
+        Assunto: <span className="text-zinc-200">{copy.title}</span>
+      </p>
+      <pre className="whitespace-pre-wrap font-sans text-zinc-200 px-3 py-3 max-h-72 overflow-auto">{copy.body}</pre>
+    </div>
+  );
+}
+
+function UndoToast({ pending, onUndo, onConfirm }: { pending: PendingDecision; onUndo: () => void; onConfirm: () => void }) {
+  const approved = pending.decision === "approved";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="undo-toast"
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[min(28rem,calc(100%-2rem))] rounded-xl bg-zinc-100 text-zinc-900 shadow-2xl overflow-hidden"
+    >
+      <div className="flex items-center gap-3 px-4 py-3 text-sm">
+        <span className="flex-1 min-w-0 truncate">
+          {approved ? "Aprovando" : "Rejeitando"} “{pending.copy.title}”
+        </span>
+        <button type="button" onClick={onUndo} className="font-semibold underline underline-offset-2">
+          Desfazer
+        </button>
+        <button type="button" onClick={onConfirm} className="text-zinc-600 hover:text-zinc-900">
+          Confirmar agora
+        </button>
+      </div>
+      <div
+        key={pending.copy.id + pending.startedAt}
+        className={`h-1 origin-left ${approved ? "bg-emerald-600" : "bg-rose-600"}`}
+        style={{ animation: `omni-shrink ${UNDO_MS}ms linear forwards` }}
+      />
+      <style>{"@keyframes omni-shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}"}</style>
+    </div>
   );
 }
 
@@ -743,7 +970,23 @@ function Agentes({ onRun }: { onRun: () => Promise<void> }) {
   );
 }
 
-function Faturamento() {
+/** Barras diárias do mês: mostra quando os resultados aconteceram, não só quantos. */
+function DailyBars({ month, dates }: { month: string; dates: string[] }) {
+  const [y, m] = month.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const counts = Array.from({ length: days }, () => 0);
+  for (const d of dates) if (d.startsWith(month)) counts[Number(d.slice(8, 10)) - 1]++;
+  const max = Math.max(1, ...counts);
+  return (
+    <svg viewBox={`0 0 ${days * 4} 16`} className="w-28 h-4 mt-1" role="img" aria-label={`Por dia: ${counts.join(", ")}`}>
+      {counts.map((c, i) => (
+        <rect key={i} x={i * 4} y={16 - (c / max) * 16} width={3} height={Math.max(c ? 2 : 0.5, (c / max) * 16)} fill={c ? "#38bdf8" : "#3f3f46"} />
+      ))}
+    </svg>
+  );
+}
+
+function Faturamento({ state }: { state: DashboardState }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [usage, setUsage] = useState<BillingUsage | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -783,7 +1026,10 @@ function Faturamento() {
               </tr>
               {usage.lines.map((line) => (
                 <tr key={line.kind} className="border-t border-zinc-800" data-testid={`billing-${line.kind}`}>
-                  <td className="p-2">{BILL_LABEL[line.kind]}</td>
+                  <td className="p-2">
+                    {BILL_LABEL[line.kind]}
+                    <DailyBars month={usage.month} dates={usage.ledger.filter((e) => e.kind === line.kind).map((e) => e.createdAt)} />
+                  </td>
                   <td>{line.count}</td>
                   <td>{cents(line.unitCents)}</td>
                   <td className="pr-2 text-right">{cents(line.subtotalCents)}</td>
@@ -799,20 +1045,48 @@ function Faturamento() {
               </tr>
             </tbody>
           </table>
-          <details className="text-xs text-zinc-400">
-            <summary className="cursor-pointer">Extrato ({usage.ledger.length} eventos)</summary>
-            <ul className="mt-2 space-y-1 font-mono">
-              {usage.ledger.map((e) => (
-                <li key={e.id}>
-                  {e.createdAt.slice(0, 16).replace("T", " ")} · {e.kind} · {e.refId} · {e.actor}
-                </li>
-              ))}
-            </ul>
-          </details>
+          <div>
+            <h3 className="text-sm font-medium mb-2">Extrato ({usage.ledger.length} eventos)</h3>
+            {usage.ledger.length === 0 && <p className="text-xs text-zinc-500">Nenhum resultado faturável neste mês.</p>}
+            {usage.ledger.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-zinc-300" data-testid="billing-ledger">
+                  <thead className="text-left text-zinc-500 border-b border-zinc-800">
+                    <tr>
+                      <th className="py-1 pr-2">Quando</th>
+                      <th className="pr-2">Resultado</th>
+                      <th className="pr-2">Referente a</th>
+                      <th className="pr-2">Quem decidiu</th>
+                      <th className="text-right">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...usage.ledger]
+                      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                      .slice(0, 100)
+                      .map((e) => (
+                        <tr key={e.id} className="border-b border-zinc-900">
+                          <td className="py-1 pr-2 font-mono whitespace-nowrap">{e.createdAt.slice(5, 16).replace("T", " ")}</td>
+                          <td className="pr-2">{BILL_LABEL[e.kind]?.split(" (")[0] ?? e.kind}</td>
+                          <td className="pr-2">{ledgerRef(state, e.kind, e.refId)}</td>
+                          <td className="pr-2 font-mono">{e.actor}</td>
+                          <td className="text-right font-mono">{cents(usage.lines.find((l) => l.kind === e.kind)?.unitCents ?? 0)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
     </section>
   );
+}
+
+function ledgerRef(state: DashboardState, kind: string, refId: string): string {
+  if (kind === "copy_approved") return state.copies.find((c) => c.id === refId)?.title ?? "peça removida";
+  return state.leads.find((l) => l.id === refId)?.name ?? "titular anonimizado (LGPD)";
 }
 
 type Keys = { apiKey: string; harnessKey: string | null; captureKey: string | null; whatsappPhoneId: string | null; users: SessionUser[] };
