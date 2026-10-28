@@ -185,6 +185,8 @@ describe("LGPD", () => {
       assert.equal(s.listCopies("org-acme").filter((c) => c.leadId === lead.id).length, 0);
       assert.equal(s.billingUsage(owner).lines.find((l) => l.kind === "deal_won")!.count, billedBefore);
       assert.ok(!s.dashboard(owner).leads.some((l) => l.id === lead.id));
+      // listLeads alimenta list_leads (MCP), get_insights e o agente de operação
+      assert.ok(!s.listLeads("org-acme").some((l) => l.id === lead.id));
     }));
 });
 

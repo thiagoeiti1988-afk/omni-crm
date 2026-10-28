@@ -72,7 +72,7 @@ export const TOOLS = [
   },
   {
     name: "upsert_lead",
-    description: "Capture or dedupe a lead. Consent is mandatory.",
+    description: "Capture or dedupe a lead. Consent is mandatory; email or phone is required.",
     inputSchema: {
       type: "object",
       properties: {
@@ -86,7 +86,7 @@ export const TOOLS = [
         stage: { type: "string" },
         externalId: { type: "string" },
       },
-      required: ["projectId", "name", "email", "source", "consent"],
+      required: ["projectId", "name", "source", "consent"],
     },
   },
   {
@@ -333,15 +333,16 @@ export function callTool(
       const projectId = str(args.projectId);
       const leadName = str(args.name);
       const email = str(args.email);
+      const phone = str(args.phone);
       const source = str(args.source);
-      if (!projectId || !leadName || !email || !source) {
-        throw new StoreError("projectId, name, email, source required");
+      if (!projectId || !leadName || (!email && !phone) || !source) {
+        throw new StoreError("projectId, name, email or phone, source required");
       }
       return store.upsertLead(auth, {
         projectId,
         name: leadName,
         email,
-        phone: str(args.phone),
+        phone,
         source,
         utm: str(args.utm),
         consent: args.consent,

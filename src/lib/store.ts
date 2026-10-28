@@ -956,8 +956,11 @@ export class OmniStore {
     return this.getIcp(auth.org.id, input.projectId)!;
   }
 
+  /** Titulares anonimizados (LGPD) ficam fora de qualquer listagem; o registro só sobrevive para a fatura. */
   listLeads(orgId: string): Lead[] {
-    const rows = this.db.prepare("SELECT * FROM leads WHERE org_id = ? ORDER BY created_at").all(orgId) as Record<string, unknown>[];
+    const rows = this.db
+      .prepare("SELECT * FROM leads WHERE org_id = ? AND erased_at IS NULL ORDER BY created_at")
+      .all(orgId) as Record<string, unknown>[];
     return rows.map((row) => this.mapLead(row));
   }
 
@@ -1328,7 +1331,7 @@ export class OmniStore {
     const logs = this.db.prepare(
       "SELECT * FROM agent_logs WHERE org_id = ? ORDER BY created_at DESC LIMIT 20",
     ).all(auth.org.id) as Record<string, string>[];
-    const leads = this.listLeads(auth.org.id).filter((lead) => !lead.erasedAt);
+    const leads = this.listLeads(auth.org.id);
     const tasks = this.listTasks(auth.org.id);
     const copies = this.listCopies(auth.org.id);
     const icp = this.getIcp(auth.org.id) ?? null;
