@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { login, uniq } from "./helpers";
 
 test("sem sessão vai para o login; senha errada mostra erro", async ({ page }) => {
@@ -9,6 +9,15 @@ test("sem sessão vai para o login; senha errada mostra erro", async ({ page }) 
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page.locator("form [role=alert]")).toContainText("inválidos");
 });
+
+/** Seleciona a peça na fila (se houver mais de uma) e devolve o cartão em revisão. */
+async function openInReview(page: Page, title: string) {
+  const pick = page.getByRole("list", { name: "Próximas na fila" }).getByRole("button", { name: new RegExp(title) });
+  if (await pick.count()) await pick.click();
+  const card = page.getByRole("article", { name: new RegExp(title) });
+  await expect(card).toBeVisible();
+  return card;
+}
 
 test("fluxo completo: site capta → agente escreve → humano aprova → Quanta fecha → fatura", async ({ page, request }) => {
   const name = uniq("Visitante");
@@ -43,12 +52,14 @@ test("fluxo completo: site capta → agente escreve → humano aprova → Quanta
   await expect(page.getByRole("status")).toContainText("Human Review");
 
   // 4. Human Review: a peça cita ICP, cumprimenta o lead pelo nome e não vaza o e-mail.
+  await expect(page.getByTestId("review-waiting")).toContainText("aguardando você");
   await page.getByRole("button", { name: /Human Review/ }).click();
-  const card = page.locator("li", { hasText: `para ${name}` }).first();
+  const card = await openInReview(page, `para ${name}`);
   await expect(card).toContainText(`Olá ${name}`);
-  await expect(card).toContainText("icp:");
+  await expect(card).toContainText("Fonte: ICP aprovado");
   await expect(card).not.toContainText(email);
-  await card.getByRole("button", { name: "Aprovar" }).click();
+  await card.getByRole("button", { name: /Aprovar/ }).click();
+  await page.getByTestId("undo-toast").getByRole("button", { name: "Confirmar agora" }).click();
   await expect(page.getByRole("status")).toContainText("Quanta fechada");
 
   // 5. Quanta de revisão foi para Done.
@@ -58,12 +69,45 @@ test("fluxo completo: site capta → agente escreve → humano aprova → Quanta
   // 6. Faturamento por resultado registrou exatamente uma aprovação a mais.
   await page.getByRole("button", { name: "Faturamento" }).click();
   await expect(approvedLine.locator("td").nth(1)).toHaveText(String(approvedBefore + 1));
+  // Extrato diz o que foi cobrado e quem decidiu.
+  const ledgerRow = page.getByTestId("billing-ledger").locator("tr", { hasText: `para ${name}` });
+  await expect(ledgerRow).toContainText("owner@acme.demo");
 
   // 7. Sair encerra a sessão.
   await page.getByRole("button", { name: "Sair" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
+});
+
+test("Human Review por teclado: A aprova, U desfaz antes de cobrar, e a decisão confirma sozinha", async ({ page, request }) => {
+  const name = uniq("Teclado");
+  const res = await request.post("/api/capture", {
+    data: { key: "omni_pub_acme_demo", name, email: `${name.toLowerCase()}@x.com`, consent: true },
+  });
+  expect(res.status()).toBe(201);
+  await login(page, "owner@acme.demo");
+  await page.getByRole("button", { name: "Leads" }).click();
+  await page.getByLabel("Filtrar leads").fill(name);
+  await page.locator("tr", { hasText: name }).getByRole("button", { name: "Gerar copy" }).click();
+  await expect(page.getByRole("status")).toContainText("Human Review");
+
+  await page.getByRole("button", { name: /Human Review/ }).click();
+  const card = await openInReview(page, `para ${name}`);
+  await page.keyboard.press("a");
+  const toast = page.getByTestId("undo-toast");
+  await expect(toast).toContainText(`Aprovando`);
+  await expect(card).toHaveCount(0);
+
+  await page.keyboard.press("u");
+  await expect(toast).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Decisão desfeita");
+  await expect(await openInReview(page, `para ${name}`)).toBeVisible();
+
+  // Sem clicar em nada: a janela de desfazer expira e a decisão vai ao servidor.
+  await page.keyboard.press("a");
+  await expect(page.getByRole("status")).toContainText("Quanta fechada", { timeout: 10_000 });
+  await expect(page.getByRole("article", { name: new RegExp(`para ${name}`) })).toHaveCount(0);
 });
 
 test("closer move funil (gera lead qualificado faturável) e não vê Integrações", async ({ page }) => {

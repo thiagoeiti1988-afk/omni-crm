@@ -165,3 +165,19 @@ Fase 5 (produção):
 | Runbook | ✅ `docs/RUNBOOK.md` |
 | Embedding configurável sem vendor hardcode | ✅ `EMBEDDING_MODEL`; default local |
 | Multi-instância (Postgres + Redis) | ⏳ próximo ciclo — ver `docs/MERCADO.md` §5 |
+
+## Fase 6 — Experiência de aprovação e prova de valor (28/10/2026)
+
+Padrões de interface pesquisados no Mobbin (Higgsfield, Cofounder, AirOps, ManyChat, Vercel, Pipedrive).
+
+| Item | Estado | Evidência |
+| :--- | :-: | :--- |
+| Human Review como cartão de decisão: prévia no formato do canal, fontes legíveis | ✅ | `Review` / `ChannelPreview` em `OpsConsole.tsx` |
+| Teclado (A/R/J/K/U) e desfazer de 5 s antes de cobrar | ✅ | E2E "Human Review por teclado" |
+| Aviso "N peças aguardando você" fora da aba de review | ✅ | E2E fluxo completo |
+| Extrato da fatura: o quê, referente a quem, quem decidiu, barras por dia | ✅ | E2E confere a linha com `owner@acme.demo` |
+| Teste simulado contra servidor real (`npm run simulate`) | ✅ | 11/11 passos via formulário e via WhatsApp assinado |
+| MCP e painel sem vetor de embedding no payload | ✅ | teste unitário; `/api/state` da demo caiu de 37,8 KB para 21 KB |
+| Confiança progressiva (liberar tipo de peça para harness após N aprovações) | ⏳ | exige política por org no servidor |
+| Envio outbound da peça aprovada no WhatsApp | ⏳ | maior pedido de cliente; custo por mensagem da Meta entra no preço |
+| Postgres + Redis (multi-instância) | ⏳ | `schema.sql` já espelha o v2 |

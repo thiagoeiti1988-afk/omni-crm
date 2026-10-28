@@ -251,6 +251,24 @@ describe("Omni-CRM kernel", () => {
       assert.equal(got.id, task.id);
     }));
 
+  it("peças não devolvem o vetor de embedding, mas a busca continua ranqueando", () =>
+    withStore((store) => {
+      const auth = orgAuth(store, "omni_org_acme_demo");
+      const projectId = store.listProjects(auth.org.id)[0].id;
+      const copy = callTool(store, auth, "create_copy_job", {
+        projectId, channel: "whatsapp", title: "Clínica multiunidade", body: "Agenda centralizada para três unidades",
+      }) as { embedding: unknown };
+      assert.equal(copy.embedding, null);
+      const hits = callTool(store, auth, "search_copy", { query: "agenda centralizada unidades" }) as Array<{
+        title: string;
+        score: number;
+        embedding: unknown;
+      }>;
+      assert.equal(hits[0].title, "Clínica multiunidade");
+      assert.ok(hits[0].score > 0);
+      assert.ok(hits.every((h) => h.embedding === null));
+    }));
+
   it("upsert_lead via MCP aceita lead só com telefone", () =>
     withStore((store) => {
       const auth = orgAuth(store, "omni_org_acme_demo");
